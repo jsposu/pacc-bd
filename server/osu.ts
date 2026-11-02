@@ -1,6 +1,7 @@
 import { setTimeout as wait } from 'node:timers/promises'
 import { retryAfter } from './mirrors.js'
 import type { TournamentEntry, TournamentManifest } from './types.js'
+import { mapAttributes } from './mapMetadata.js'
 
 export type IdKind = 'beatmap' | 'beatmapset'
 export type OsuInput = { source: string; kind: IdKind; id: number }
@@ -80,7 +81,7 @@ export class OsuRateLimit extends Error {
   constructor(public delay: number | null) { super('osu! rate limited metadata requests (HTTP 429).') }
 }
 
-type PageSet = { id: number; artist?: string; title?: string; creator?: string; status?: string; bpm?: number; covers?: { cover?: string; card?: string }; beatmaps?: Array<{ id: number; checksum?: string; version?: string; difficulty_rating?: number; bpm?: number; convert?: boolean }> }
+type PageSet = { id: number; artist?: string; title?: string; creator?: string; status?: string; bpm?: number; covers?: { cover?: string; card?: string }; beatmaps?: Array<{ id: number; checksum?: string; version?: string; difficulty_rating?: number; bpm?: number; convert?: boolean } & Record<string, any>> } & Record<string, any>
 function positiveStat(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null }
 export function parseOsuPage(html: string, requested: OsuInput): { set: PageSet; entry: TournamentEntry } {
   const match = /<script\b[^>]*\bid=["']json-beatmapset["'][^>]*>([\s\S]*?)<\/script>/i.exec(html)
@@ -93,10 +94,11 @@ export function parseOsuPage(html: string, requested: OsuInput): { set: PageSet;
   if (requested.kind === 'beatmap' && !diff) throw new Error(`Beatmap ${requested.id} is not available in this beatmapset.`)
   const cover = [set.covers?.cover, set.covers?.card].find(image => typeof image === 'string' && /^https:\/\/assets\.ppy\.sh\/beatmaps\/\d+\//.test(image)) ?? null
   return { set, entry: {
+    ...mapAttributes(diff, set),
     source: requested.source, kind: requested.kind, requestedId: requested.id, beatmapsetId: set.id,
     difficultyId: diff?.id ?? null, checksum: diff?.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null,
     version: diff?.version ?? null, stars: positiveStat(diff?.difficulty_rating), bpm: positiveStat(diff?.bpm) ?? positiveStat(set.bpm),
-    setDifficulties: set.beatmaps.filter(map => Number.isSafeInteger(map.id)).map(map => ({ id: map.id, stars: positiveStat(map.difficulty_rating), bpm: positiveStat(map.bpm) ?? positiveStat(set.bpm) })),
+    setDifficulties: set.beatmaps.filter(map => Number.isSafeInteger(map.id)).map(map => ({ ...mapAttributes(map, set), id: map.id, checksum: typeof map.checksum === 'string' && /^[\da-f]{32}$/i.test(map.checksum) ? map.checksum : null, stars: positiveStat(map.difficulty_rating), bpm: positiveStat(map.bpm) ?? positiveStat(set.bpm) })),
     artist: set.artist || 'Unknown artist', title: set.title || 'Unknown title', creator: set.creator || 'Unknown mapper',
     status: set.status || 'unknown', cover,
   } }
@@ -128,7 +130,7 @@ export async function resolveOsuInputs(input: string, numberKind: IdKind, reques
         }
         resolved = parseOsuPage(html, item)
         bySet.set(resolved.set.id, { set: resolved.set, entry: { ...resolved.entry, kind: 'beatmapset', difficultyId: null, checksum: null, version: null, stars: null } })
-        for (const diff of resolved.set.beatmaps || []) byDifficulty.set(diff.id, { set: resolved.set, entry: { ...resolved.entry, difficultyId: diff.id, checksum: diff.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null, version: diff.version ?? null, stars: positiveStat(diff.difficulty_rating), bpm: positiveStat(diff.bpm) ?? positiveStat(resolved.set.bpm) } })
+        for (const diff of resolved.set.beatmaps || []) byDifficulty.set(diff.id, { set: resolved.set, entry: { ...resolved.entry, ...mapAttributes(diff, resolved.set), status: diff.status || resolved.entry.status, difficultyId: diff.id, checksum: diff.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null, version: diff.version ?? null, stars: positiveStat(diff.difficulty_rating), bpm: positiveStat(diff.bpm) ?? positiveStat(resolved.set.bpm) } })
       }
       // Cache entries never change the original source, kind, and requested ID.
       entries.push({ ...resolved.entry, source: item.source, kind: item.kind, requestedId: item.id, difficultyId: item.kind === 'beatmap' ? item.id : null, checksum: item.kind === 'beatmap' ? resolved.entry.checksum : null, version: item.kind === 'beatmap' ? resolved.entry.version : null, stars: item.kind === 'beatmap' ? resolved.entry.stars : null })

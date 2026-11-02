@@ -1,4 +1,5 @@
 import type { Collection, Difficulty } from './types.js'
+import { mapAttributes } from './mapMetadata.js'
 
 const ORIGIN = 'https://osucollector.com'
 const agent = 'PACC-BD/1.0 (local public collection downloader)'
@@ -34,10 +35,11 @@ export function normalizeMap(raw: any): Difficulty | null {
   const set = raw?.beatmapset ?? {}
   const cover = [set.covers?.cover, set.covers?.card].find((image): image is string => typeof image === 'string' && /^https:\/\/assets\.ppy\.sh\/beatmaps\/\d+\//.test(image)) ?? null
   return {
+    ...mapAttributes(raw, set),
     id, beatmapsetId: positive(raw?.beatmapset_id ?? set.id),
     checksum: typeof raw?.checksum === 'string' && /^[a-f\d]{32}$/i.test(raw.checksum) ? raw.checksum : null,
     version: text(raw?.version, 'Unknown difficulty'), mode: text(raw?.mode, 'osu'),
-    stars: finite(raw?.difficulty_rating), status: text(raw?.status, 'unknown'),
+    stars: finite(raw?.difficulty_rating), status: text(raw?.status, text(set.status, 'unknown')),
     artist: text(set.artist, 'Unknown artist'), title: text(set.title, 'Unknown title'), creator: text(set.creator, 'Unknown mapper'),
     cover, bpm: finite(raw?.bpm ?? set.bpm), length: finite(raw?.hit_length),
   }

@@ -1,4 +1,20 @@
-export type Difficulty = {
+export type MapAttributes = {
+  ar?: number | null
+  od?: number | null
+  cs?: number | null
+  hp?: number | null
+  length?: number | null
+  mode?: string | null
+  status?: string | null
+  genre?: string | null
+  language?: string | null
+  explicit?: boolean | null
+  video?: boolean | null
+  storyboard?: boolean | null
+  featuredArtist?: boolean | null
+  convert?: boolean | null
+}
+export type Difficulty = MapAttributes & {
   id: number
   beatmapsetId: number | null
   checksum: string | null
@@ -21,7 +37,7 @@ export type Collection = {
   maps: Difficulty[]
   fetchedAt: string
 }
-export type TournamentEntry = {
+export type TournamentEntry = MapAttributes & {
   source: string
   kind: 'beatmap' | 'beatmapset'
   requestedId: number
@@ -31,7 +47,7 @@ export type TournamentEntry = {
   version: string | null
   stars: number | null
   bpm?: number | null
-  setDifficulties?: { id: number; stars: number | null; bpm: number | null }[]
+  setDifficulties?: (MapAttributes & { id: number; checksum?: string | null; stars: number | null; bpm: number | null })[]
   artist: string
   title: string
   creator: string

@@ -5,13 +5,16 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
 import type { Queue } from './queue.js'
+import type { MapAttributes, TournamentEntry } from './types.js'
+import { matchesMapFilters, parseMapFilters } from './mapFilters.js'
 
 const run = promisify(execFile)
 const HASH = /^[a-f0-9]{32}$/i
 const MAX_DB = 64 * 1024 * 1024
 const MAX_MAPS = 100000
 type StableCollection = { name: string; hashes: string[] }
-export type InstalledMap = { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null }
+export type InstalledMap = MapAttributes & { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null }
+export type ScanProgress = { phase: 'idle' | 'counting' | 'scanning' | 'ready' | 'error'; processed: number; total: number | null; percent: number | null; error?: string }
 type Database = { version: number; collections: StableCollection[] }
 
 export function parseCollectionDb(buffer: Buffer): Database {
@@ -90,23 +93,23 @@ function positive(value: string | undefined): number | null { const n = Number(v
 export function installedMap(buffer: Buffer): InstalledMap {
   const content = buffer.subarray(0, 128 * 1024).toString('utf8')
   const fields: Record<string, string> = {}
-  let inMetadata = false
-  let inTiming = false
+  let section = ''
   let bpm: number | null = null
   for (const line of content.split(/\r?\n/)) {
-    if (line.trim() === '[Metadata]') { inMetadata = true; inTiming = false; continue }
-    if (line.trim() === '[TimingPoints]') { inMetadata = false; inTiming = true; continue }
-    if (/^\[.*\]/.test(line.trim())) { inMetadata = false; inTiming = false; continue }
-    if (inTiming && bpm === null) {
+    const heading = /^\[(.*)\]$/.exec(line.trim())
+    if (heading) { section = heading[1]; continue }
+    if (section === 'TimingPoints' && bpm === null) {
       const parts = line.split(',')
       const beatLength = Number(parts[1])
       if (parts.length >= 7 && Number(parts[6]) === 1 && Number.isFinite(beatLength) && beatLength > 0) bpm = Math.round(60000 / beatLength * 10) / 10
     }
-    if (!inMetadata) continue
+    if (!['Metadata', 'Difficulty', 'General'].includes(section)) continue
     const at = line.indexOf(':')
     if (at > 0) fields[line.slice(0, at).trim()] = line.slice(at + 1).trim()
   }
-  return { checksum: md5(buffer), artist: fields.Artist || 'Unknown artist', title: fields.Title || 'Unknown title', creator: fields.Creator || 'Unknown mapper', version: fields.Version || 'Unknown difficulty', beatmapId: positive(fields.BeatmapID), beatmapsetId: positive(fields.BeatmapSetID), stars: null, bpm }
+  const stat = (name: string) => fields[name] !== undefined && Number.isFinite(Number(fields[name])) && Number(fields[name]) >= 0 ? Number(fields[name]) : null
+  return { checksum: md5(buffer), artist: fields.Artist || 'Unknown artist', title: fields.Title || 'Unknown title', creator: fields.Creator || 'Unknown mapper', version: fields.Version || 'Unknown difficulty', beatmapId: positive(fields.BeatmapID), beatmapsetId: positive(fields.BeatmapSetID), stars: null, bpm,
+    ar: stat('ApproachRate') ?? stat('OverallDifficulty'), od: stat('OverallDifficulty'), cs: stat('CircleSize'), hp: stat('HPDrainRate'), mode: ['osu', 'taiko', 'fruits', 'mania'][Number(fields.Mode ?? 0)] ?? null, convert: false }
 }
 
 async function osuRunning(): Promise<boolean> {
@@ -121,25 +124,35 @@ export class StableManager {
   private scannedDirectory: string | null = null
   private scanning: Promise<void> | null = null
   private writing: Promise<unknown> = Promise.resolve()
+  private connecting = false
+  private progress: ScanProgress = { phase: 'idle', processed: 0, total: null, percent: null }
+  scanProgress(): ScanProgress { return { ...this.progress } }
   constructor(private queue: Queue, private isRunning: () => Promise<boolean> = osuRunning) {}
 
-  private metadata(): Map<number, { stars: number | null; bpm: number | null }> {
-    const metadata = new Map<number, { stars: number | null; bpm: number | null }>()
-    const add = (id: number, stars: number | null, bpm: number | null) => {
+  private metadata(): Map<number, MapAttributes & { stars: number | null; bpm: number | null }> {
+    const metadata = new Map<number, MapAttributes & { stars: number | null; bpm: number | null }>()
+    const add = (id: number, entry: MapAttributes & { stars: number | null; bpm?: number | null }) => {
       const old = metadata.get(id)
-      metadata.set(id, { stars: old?.stars ?? stars, bpm: old?.bpm ?? bpm })
+      const value = { ...entry, stars: old?.stars ?? entry.stars, bpm: old?.bpm ?? entry.bpm ?? null }
+      for (const key of ['ar', 'od', 'cs', 'hp', 'length', 'mode', 'status', 'genre', 'language', 'explicit', 'video', 'storyboard', 'featuredArtist', 'convert'] as const) {
+        if (old?.[key] != null) Object.assign(value, { [key]: old[key] })
+      }
+      metadata.set(id, value)
     }
-    for (const collection of this.queue.state.collections) for (const map of collection.maps) add(map.id, map.stars, map.bpm)
+    for (const collection of this.queue.state.collections) for (const map of collection.maps) add(map.id, map)
     for (const entry of this.queue.state.tournament?.entries || []) {
-      if (entry.difficultyId) add(entry.difficultyId, entry.stars, entry.bpm ?? null)
-      for (const diff of entry.setDifficulties || []) add(diff.id, diff.stars, diff.bpm)
+      if (entry.difficultyId) add(entry.difficultyId, entry)
+      for (const diff of entry.setDifficulties || []) add(diff.id, diff)
     }
     return metadata
   }
 
-  private withStats(map: InstalledMap, metadata: Map<number, { stars: number | null; bpm: number | null }>): InstalledMap {
+  private withStats(map: InstalledMap, metadata: ReturnType<StableManager['metadata']>): InstalledMap {
     const match = map.beatmapId ? metadata.get(map.beatmapId) : null
-    return { ...map, stars: match?.stars ?? null, bpm: map.bpm ?? match?.bpm ?? null }
+    // An installed difficulty must never inherit set-only sibling matching from metadata.
+    const result = { ...match, ...map, difficultyId: map.beatmapId, setDifficulties: undefined, stars: match?.stars ?? null, bpm: map.bpm ?? match?.bpm ?? null }
+    for (const key of ['ar', 'od', 'cs', 'hp', 'length', 'mode', 'status', 'genre', 'language', 'explicit', 'video', 'storyboard', 'featuredArtist'] as const) if (result[key] == null && match?.[key] != null) Object.assign(result, { [key]: match[key] })
+    return result
   }
 
   private async folder(input = this.queue.state.stableDirectory): Promise<string> {
@@ -152,15 +165,23 @@ export class StableManager {
   }
 
   async connect(input: string) {
-    await this.writing.catch(() => {})
-    if (this.scanning) await this.scanning
-    const directory = await this.folder(input)
-    await this.readDb(directory)
-    this.queue.state.stableDirectory = directory
-    await this.queue.persist()
-    this.scannedDirectory = null
-    this.installed.clear()
-    return this.list()
+    if (this.connecting) throw new Error('A library is already opening. Wait for it to finish.')
+    this.connecting = true
+    this.progress = { phase: 'counting', processed: 0, total: null, percent: null }
+    try {
+      await this.writing.catch(() => {})
+      if (this.scanning) await this.scanning
+      const directory = await this.folder(input)
+      await this.readDb(directory)
+      this.queue.state.stableDirectory = directory
+      await this.queue.persist()
+      this.scannedDirectory = null
+      this.installed.clear()
+      return await this.list()
+    } catch (cause) {
+      this.progress = { ...this.progress, phase: 'error', percent: null, error: (cause as Error).message }
+      throw cause
+    } finally { this.connecting = false }
   }
 
   private async readDb(directory: string) {
@@ -175,36 +196,52 @@ export class StableManager {
     if (this.scannedDirectory === directory) return
     if (this.scanning) return this.scanning
     this.scanning = (async () => {
+      this.progress = { phase: 'counting', processed: 0, total: null, percent: null }
       const found = new Map<string, InstalledMap>()
       const pending = [path.join(directory, 'Songs')]
-      let count = 0
+      const files: string[] = []
       while (pending.length) {
         const folder = pending.pop()!
         for await (const item of await fs.opendir(folder)) {
           const file = path.join(folder, item.name)
           if (item.isDirectory()) pending.push(file)
           else if (item.isFile() && item.name.toLowerCase().endsWith('.osu')) {
-            if (++count > MAX_MAPS) throw new Error('Too many installed maps to scan safely.')
-            const stat = await fs.stat(file)
-            if (stat.size < 16 || stat.size > 8 * 1024 * 1024) continue
-            const data = await fs.readFile(file)
-            const map = installedMap(data)
-            found.set(map.checksum, map)
+            if (files.length >= MAX_MAPS) throw new Error('Too many installed maps to scan safely.')
+            files.push(file)
           }
         }
       }
+      this.progress = { phase: 'scanning', processed: 0, total: files.length, percent: 0 }
+      for (const file of files) {
+        const stat = await fs.stat(file)
+        if (stat.size >= 16 && stat.size <= 8 * 1024 * 1024) {
+          const map = installedMap(await fs.readFile(file))
+          found.set(map.checksum, map)
+        }
+        this.progress.processed++
+        this.progress.percent = Math.floor(this.progress.processed / files.length * 100)
+      }
       this.installed = found
       this.scannedDirectory = directory
+      this.progress = { phase: 'ready', processed: files.length, total: files.length, percent: 100 }
     })()
-    try { await this.scanning } finally { this.scanning = null }
+    try { await this.scanning } catch (cause) {
+      this.progress = { ...this.progress, phase: 'error', percent: null, error: (cause as Error).message }
+      throw cause
+    } finally { this.scanning = null }
   }
 
   async list(refresh = false) {
-    const directory = await this.folder()
-    if (refresh) this.scannedDirectory = null
-    await this.scan(directory)
-    const { db, revision } = await this.readDb(directory)
-    return { directory, revision, installedCount: this.installed.size, collections: db.collections.map(c => ({ name: c.name, count: c.hashes.length })) }
+    try {
+      const directory = await this.folder()
+      if (refresh) this.scannedDirectory = null
+      await this.scan(directory)
+      const { db, revision } = await this.readDb(directory)
+      return { directory, revision, installedCount: this.installed.size, collections: db.collections.map(c => ({ name: c.name, count: c.hashes.length })) }
+    } catch (cause) {
+      if (this.progress.phase !== 'idle') this.progress = { ...this.progress, phase: 'error', percent: null, error: (cause as Error).message }
+      throw cause
+    }
   }
 
   async collection(name: string) {
@@ -217,29 +254,17 @@ export class StableManager {
     return { revision, name, maps: collection.hashes.map(hash => ({ checksum: hash, installed: this.installed.has(hash.toLowerCase()) ? this.withStats(this.installed.get(hash.toLowerCase())!, metadata) : null })) }
   }
 
-  async search(query: string, options: { starsMin?: unknown; starsMax?: unknown; bpmMin?: unknown; bpmMax?: unknown; includeUnknown?: unknown } = {}) {
+  async search(query: string, options: Record<string, unknown> = {}) {
     const directory = await this.folder()
     await this.scan(directory)
     const term = String(query || '').slice(0, 120).toLocaleLowerCase()
     const results: InstalledMap[] = []
     const metadata = this.metadata()
-    const number = (value: unknown, max: number) => {
-      if (value === undefined) return null
-      if (typeof value !== 'string' || !value.trim() || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > max) throw new Error('Choose a valid star rating or BPM range.')
-      return Number(value)
-    }
-    const starsMin = number(options.starsMin, 30), starsMax = number(options.starsMax, 30)
-    const bpmMin = number(options.bpmMin, 2000), bpmMax = number(options.bpmMax, 2000)
-    if ((starsMin !== null && starsMax !== null && starsMin > starsMax) || (bpmMin !== null && bpmMax !== null && bpmMin > bpmMax)) throw new Error('Choose a valid star rating or BPM range.')
-    const inRange = (value: number | null, min: number | null, max: number | null) => {
-      if (min === null && max === null) return true
-      if (value === null) return options.includeUnknown === 'true'
-      return (min === null || value >= min) && (max === null || value <= max)
-    }
+    const filters = parseMapFilters(options)
     for (const map of this.installed.values()) {
       if (`${map.artist} ${map.title} ${map.version} ${map.creator} ${map.beatmapId || ''} ${map.beatmapsetId || ''}`.toLocaleLowerCase().includes(term)) {
         const enriched = this.withStats(map, metadata)
-        if (inRange(enriched.stars, starsMin, starsMax) && inRange(enriched.bpm, bpmMin, bpmMax)) results.push(enriched)
+        if (matchesMapFilters(enriched, filters)) results.push(enriched)
       }
       if (results.length >= 80) break
     }
@@ -259,10 +284,10 @@ export class StableManager {
     const current = this.queue.state.collections.find(c => c.id === this.queue.state.currentId)
     const metadata = this.metadata()
     const entries = source === 'collector'
-      ? (current?.maps || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.id, beatmapsetId: map.beatmapsetId, stars: map.stars, bpm: map.bpm, setDifficulties: undefined as { id: number; stars: number | null; bpm: number | null }[] | undefined }))
-      : (this.queue.state.tournament?.entries || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.difficultyId, beatmapsetId: map.beatmapsetId, stars: map.stars, bpm: map.bpm, setDifficulties: map.setDifficulties }))
+      ? (current?.maps || []).map(map => ({ ...map, beatmapId: map.id, setDifficulties: undefined as TournamentEntry['setDifficulties'] }))
+      : (this.queue.state.tournament?.entries || []).map(map => ({ ...map, beatmapId: map.difficultyId }))
     const seen = new Set<string>()
-    const maps: { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null; installed: InstalledMap | null }[] = []
+    const maps: (MapAttributes & { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; difficultyId: number | null; setDifficulties?: undefined; beatmapsetId: number | null; stars: number | null; bpm: number | null; installed: InstalledMap | null })[] = []
     let total = 0
     const append = (entry: typeof entries[number], installed: InstalledMap | null) => {
       const key = installed ? `hash:${installed.checksum}` : entry.checksum ? `missing:${entry.checksum.toLowerCase()}` : `missing:${entry.beatmapId || 0}:${entry.beatmapsetId || 0}`
@@ -272,7 +297,7 @@ export class StableManager {
       if (maps.length < 5000) {
         const resolved = installed ? this.withStats(installed, metadata) : null
         const sibling = entry.setDifficulties?.find(diff => diff.id === resolved?.beatmapId)
-        maps.push({ key, artist: resolved?.artist || entry.artist, title: resolved?.title || entry.title, version: resolved?.version || entry.version, beatmapId: resolved?.beatmapId || entry.beatmapId, beatmapsetId: resolved?.beatmapsetId || entry.beatmapsetId, stars: resolved?.stars ?? sibling?.stars ?? entry.stars ?? null, bpm: resolved?.bpm ?? sibling?.bpm ?? entry.bpm ?? null, installed: resolved })
+        maps.push({ ...entry, ...sibling, ...resolved, difficultyId: resolved?.beatmapId ?? entry.beatmapId, setDifficulties: undefined, key, artist: resolved?.artist || entry.artist, title: resolved?.title || entry.title, version: resolved?.version || entry.version, beatmapId: resolved?.beatmapId || entry.beatmapId, beatmapsetId: resolved?.beatmapsetId || entry.beatmapsetId, stars: resolved?.stars ?? sibling?.stars ?? entry.stars ?? null, bpm: resolved?.bpm ?? sibling?.bpm ?? entry.bpm ?? null, installed: resolved })
       }
     }
     for (const entry of entries) {

@@ -3,12 +3,16 @@ import { Check, FolderOpen, GripVertical, Library, LoaderCircle, Plus, RefreshCc
 import { copy, localizeError, type Language, type TranslationKey } from './i18n'
 import { MapFiltersPanel } from './MapFiltersPanel'
 import { emptyFilters, matchesMapFilters, type MapFilters } from './mapFilters'
+import { LibraryProgress } from './LibraryProgress'
+import { LazerPanel } from './LazerPanel'
+import { StarRating } from './StarRating'
+import type { MapAttributes } from '../server/types'
 
 type Source = 'collector' | 'tournament'
-type MapInfo = { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null }
+type MapInfo = MapAttributes & { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null }
 type View = { directory: string; revision: string; installedCount: number; collections: { name: string; count: number }[] }
 type Detail = { name: string; revision: string; maps: { checksum: string; installed: MapInfo | null }[] }
-type PreviewMap = { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null; installed: MapInfo | null }
+type PreviewMap = MapAttributes & { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null; installed: MapInfo | null }
 type Preview = { source: Source; name: string | null; total: number; maps: PreviewMap[] }
 function Artwork({ setId }: { setId: number | null }) {
   return <span className="stable-artwork" aria-hidden="true">{setId && Number.isSafeInteger(setId) && setId > 0 && <img src={`https://assets.ppy.sh/beatmaps/${setId}/covers/card.jpg`} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none' }} />}</span>
@@ -45,6 +49,8 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [client, setClient] = useState<'stable' | 'lazer'>('stable')
+  const [libraryLoading, setLibraryLoading] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -52,7 +58,10 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
       if (!active) return
       setView(result); setDirectory(result.directory)
       if (result.collections.length) await openCollection(result.collections[0].name)
-    }).catch(() => { /* No library connected yet: show the folder setup step. */ })
+    }).catch(cause => {
+      // A first visit has no connected library; other failures must stay visible.
+      if (active && (cause as Error).message !== 'Choose your osu!stable installation folder first.') setError(localizeError((cause as Error).message, language))
+    }).finally(() => { if (active) setLibraryLoading(false) })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -73,10 +82,13 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
     finally { setBusy(false) }
   }
   async function openLibrary(selected: string) {
-    searchSeq.current++
-    const next = await api<View>('/connect', { directory: selected })
-    setView(next); setDirectory(next.directory); setDetail(null); setLibrary([]); setSearched(false); setConfirmed(false)
-    if (next.collections.length) await openCollection(next.collections[0].name)
+    setLibraryLoading(true)
+    try {
+      searchSeq.current++
+      const next = await api<View>('/connect', { directory: selected })
+      setView(next); setDirectory(next.directory); setDetail(null); setLibrary([]); setSearched(false); setConfirmed(false)
+      if (next.collections.length) await openCollection(next.collections[0].name)
+    } finally { setLibraryLoading(false) }
   }
   function connect(event: FormEvent) { event.preventDefault(); void task(() => openLibrary(directory)) }
   function browse() {
@@ -97,11 +109,14 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
   function refresh() {
     searchSeq.current++
     void task(async () => {
-      const result = await api<View>('/refresh', {})
-      setView(result)
-      if (detail) await openCollection(detail.name)
-      setPreview(await api<Preview>(`/preview?source=${source}`))
-      setSearched(false); setLibrary([])
+      setLibraryLoading(true)
+      try {
+        const result = await api<View>('/refresh', {})
+        setView(result)
+        if (detail) await openCollection(detail.name)
+        setPreview(await api<Preview>(`/preview?source=${source}`))
+        setSearched(false); setLibrary([])
+      } finally { setLibraryLoading(false) }
     })
   }
   function toggleRemove(value: string) {
@@ -123,8 +138,8 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
     edit('add', [hash], undefined, target)
   }
   function searchMaps(filters = libraryFilters) {
-    const params = new URLSearchParams({ q: query, includeUnknown: String(filters.includeUnknown) })
-    for (const key of ['starsMin', 'starsMax', 'bpmMin', 'bpmMax'] as const) if (filters[key] !== null) params.set(key, String(filters[key]))
+    const params = new URLSearchParams({ q: query })
+    for (const [key, value] of Object.entries(filters)) if (value !== null) params.set(key, String(value))
     return api<MapInfo[]>(`/search?${params.toString()}`)
   }
   async function updateSearch(filters = libraryFilters) {
@@ -144,15 +159,18 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
   const libraryVisible = library.filter(map => matchesMapFilters(map, libraryFilters))
   const membersVisible = (detail?.maps || []).filter(item => matchesMapFilters(item.installed || { stars: null, bpm: null }, memberFilters))
   const addButton = (hash: string) => <button type="button" className="stable-card-add" disabled={!detail || !confirmed || busy} onClick={() => edit('add', [hash])}><Plus size={13} />{t('stableAddOne')}</button>
-  const stats = (stars: number | null, bpm: number | null) => <span className="stable-card-stats">{stars !== null ? `${stars.toFixed(1)}★` : `★ ${t('stableUnknownStat')}`} · {bpm !== null ? `${Math.round(bpm)} BPM` : `BPM ${t('stableUnknownStat')}`}</span>
+  const stats = (stars: number | null, bpm: number | null) => <span className="stable-card-stats">{stars !== null ? <StarRating stars={stars} /> : `★ ${t('stableUnknownStat')}`} · {bpm !== null ? `${Math.round(bpm)} BPM` : `BPM ${t('stableUnknownStat')}`}</span>
 
   return <section className="stable-panel stable-page" aria-label={t('stableTitle')}>
+    <div className="library-client-tabs" role="group" aria-label={language === 'es' ? 'Cliente osu!' : 'osu! client'}><button type="button" disabled={busy || libraryLoading} aria-pressed={client === 'stable'} onClick={() => setClient('stable')}>osu!stable</button><button type="button" disabled={busy || libraryLoading} aria-pressed={client === 'lazer'} onClick={() => setClient('lazer')}>osu!lazer · {language === 'es' ? 'Exportar' : 'Export'}</button></div>
+    {client === 'lazer' ? <LazerPanel language={language} initialSource={initialSource} /> : <>
     <div className="stable-heading"><div><span className="section-label">osu!stable</span><h2>{t('stableTitle')}</h2><p className="stable-hint">{t('stableIntro')}</p></div>{view && <button type="button" className="secondary-button" disabled={busy} onClick={refresh}><RefreshCcw size={15} />{t('stableRefresh')}</button>}</div>
     <div className={`stable-setup ${view ? 'connected' : ''}`}><div className="stable-step"><span>1</span><div><strong>{t('stableStepFolder')}</strong><p>{t('stableFolderHelp')}</p></div></div>
       <form className="stable-path" onSubmit={connect}><label htmlFor="stable-directory">{t('stableFolder')}</label><div><input id="stable-directory" required value={directory} onChange={event => setDirectory(event.target.value)} placeholder={t('stablePathPlaceholder')} />{window.paccDesktop && <button type="button" className="secondary-button" onClick={browse}><FolderOpen size={15} />{t('browse')}</button>}<button type="submit" className="primary-button" disabled={busy}>{view ? t('stableChange') : t('stableConnect')}</button></div></form>
       {view && <p className="stable-connected"><Check size={15} />{t('stableConnected')} · {view.installedCount} {t('stableInstalled')}</p>}
     </div>
-    {busy && <div className="stable-message" role="status"><LoaderCircle size={16} className="spin" />{t('stableWorking')}</div>}
+    <LibraryProgress active={libraryLoading} language={language} />
+    {busy && !libraryLoading && <div className="stable-message" role="status"><LoaderCircle size={16} className="spin" />{t('stableWorking')}</div>}
     {error && <div className="stable-message error" role="alert">{error}</div>}
     {notice && <div className="stable-message success" role="status"><Check size={15} />{notice}</div>}
     {view && <>
@@ -185,6 +203,7 @@ export function StablePanel({ language, initialSource, goToSource }: { language:
          {searched && <><div className="stable-map-list stable-art-list">{libraryVisible.length ? libraryVisible.map(map => <div className={`stable-map stable-art-card can-drag ${dragActive && dragged.current === map.checksum ? 'is-dragging' : ''}`} key={map.checksum} draggable={!!confirmed && !busy && !!view.collections.length} onDragStart={event => startDrag(event, map.checksum)} onDragEnd={endDrag}><Artwork setId={map.beatmapsetId} /><span><strong>{map.artist} – {map.title}</strong><small>{map.version}{map.beatmapId ? ` · #${map.beatmapId}` : ''}</small>{stats(map.stars, map.bpm)}</span>{addButton(map.checksum)}<GripVertical className="stable-grip" size={17} aria-hidden="true" /></div>) : <p>{t('stableNoMatches')}</p>}</div><div className="stable-actions"><button className="primary-button" type="button" disabled={!detail || !confirmed || busy || !libraryVisible.length} onClick={() => edit('add', libraryVisible.map(map => map.checksum))}>{t('stableAddVisible')} ({libraryVisible.length})</button></div></>}
       </div>
       <p className="stable-warning">{t('stableWarning')}</p>
+    </>}
     </>}
   </section>
 }

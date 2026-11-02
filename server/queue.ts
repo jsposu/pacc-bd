@@ -28,6 +28,8 @@ export class Queue {
 
   constructor(private stateFile: string, state?: State, private request: typeof fetch = fetch) {
     this.state = state ?? { settings: { directory: defaultDirectory, mirror: 'direct' }, collections: [], currentId: null, queue: [], paused: false }
+    // Keep the existing OLED identifier for saved-state compatibility.
+    this.state.theme = this.state.theme === 'light' ? 'light' : 'oled'
   }
   static async open(stateFile: string, request?: typeof fetch): Promise<Queue> {
     let state: State | undefined
@@ -96,7 +98,7 @@ export class Queue {
     await this.save()
   }
   async setTheme(theme: Theme): Promise<void> {
-    if (!['team', 'light', 'oled'].includes(theme)) throw new Error('Choose a supported theme.')
+    if (!['light', 'oled'].includes(theme)) throw new Error('Choose a supported theme.')
     this.state.theme = theme
     await this.save()
   }

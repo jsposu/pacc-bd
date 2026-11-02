@@ -1,0 +1,3 @@
+// IDs from ppy/osu's Overlays/BeatmapListing/SearchGenre.cs and SearchLanguage.cs.
+export const genreChoices = [['any', 'Any'], ['1', 'Unspecified'], ['2', 'Video Game'], ['3', 'Anime'], ['4', 'Rock'], ['5', 'Pop'], ['6', 'Other'], ['7', 'Novelty'], ['9', 'Hip Hop'], ['10', 'Electronic'], ['11', 'Metal'], ['12', 'Classical'], ['13', 'Folk'], ['14', 'Jazz']] as const
+export const languageChoices = [['any', 'Any'], ['2', 'English'], ['4', 'Chinese'], ['7', 'French'], ['8', 'German'], ['11', 'Italian'], ['3', 'Japanese'], ['6', 'Korean'], ['10', 'Spanish'], ['9', 'Swedish'], ['12', 'Russian'], ['13', 'Polish'], ['5', 'Instrumental'], ['1', 'Unspecified'], ['14', 'Other']] as const

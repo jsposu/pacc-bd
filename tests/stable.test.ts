@@ -43,6 +43,8 @@ test('collection.db round-trips names, unicode, hashes and rejects truncated or 
   const timed = Buffer.concat([osu, Buffer.from('\n[TimingPoints]\n0,-100,4,2,0,100,0,0\n0,500,4,2,0,100,1,0\n')])
   assert.equal(installedMap(timed).bpm, 120)
   assert.equal(installedMap(osu).bpm, null)
+  const stats = installedMap(Buffer.concat([osu, Buffer.from('OverallDifficulty:8\nCircleSize:4\nApproachRate:9\n')]))
+  assert.deepEqual([stats.ar, stats.od, stats.cs, stats.hp, stats.mode], [9, 8, 4, 5, 'osu'])
 })
 
 test('installed-map scan matches MD5 and writes backup while preserving other collections', async t => {
@@ -51,6 +53,9 @@ test('installed-map scan matches MD5 and writes backup while preserving other co
   await fs.writeFile(mapFile, osu)
   const view = await manager.connect(directory)
   assert.equal(view.installedCount, 1)
+  assert.deepEqual(manager.scanProgress(), { phase: 'ready', processed: 1, total: 1, percent: 100 })
+  assert.equal((await manager.search('', { hpMin: '5', hpMax: '5', mode: 'osu' })).length, 1)
+  assert.equal((await manager.search('', { hpMin: '6' })).length, 0)
   assert.equal((await manager.search('12345'))[0].checksum, hash)
   assert.equal((await manager.search('an artist'))[0].version, 'Hard')
   const before = await fs.readFile(dbFile)
@@ -66,6 +71,23 @@ test('installed-map scan matches MD5 and writes backup while preserving other co
   const deleted = await manager.edit({ operation: 'delete', name: 'Renamed', revision: removed.revision, confirmedClosed: true })
   assert.deepEqual(parseCollectionDb(await fs.readFile(dbFile)).collections, [{ name: 'Untouched 🌸', hashes: [otherHash] }])
   assert.ok(deleted.backup)
+})
+
+test('library progress counts files before reporting a real percentage and recovers after errors', async t => {
+  const { directory, songs, manager } = await fixture(t)
+  assert.equal(manager.scanProgress().phase, 'idle')
+  await assert.rejects(manager.connect(path.join(directory, 'missing')))
+  assert.equal(manager.scanProgress().phase, 'error')
+  await Promise.all(Array.from({ length: 200 }, (_, n) => fs.writeFile(path.join(songs, `${n}.osu`), osu)))
+  await fs.writeFile(path.join(songs, 'too-small.osu'), '')
+  const samples: ReturnType<typeof manager.scanProgress>[] = []
+  const timer = setInterval(() => samples.push(manager.scanProgress()), 1)
+  try { await manager.connect(directory) } finally { clearInterval(timer) }
+  assert.ok(samples.some(value => value.phase === 'counting' && value.percent === null))
+  assert.ok(samples.some(value => value.phase === 'scanning' && value.total === 201 && value.percent !== null && value.percent < 100))
+  assert.deepEqual(manager.scanProgress(), { phase: 'ready', processed: 201, total: 201, percent: 100 })
+  await manager.list(true)
+  assert.equal(manager.scanProgress().percent, 100)
 })
 
 test('editing refuses unimported maps, stale revisions, duplicate names and an open game', async t => {

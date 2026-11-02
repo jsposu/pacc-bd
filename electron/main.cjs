@@ -1,9 +1,14 @@
-const { app, BrowserWindow, dialog, ipcMain, shell, session } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell, session, Menu } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs/promises')
 
 let window = null
 let server = null
 let localOrigin = ''
+let zoomFactor = 1
+let zoomWriting = Promise.resolve()
+const validZoom = value => typeof value === 'number' && Number.isFinite(value) && value >= .75 && value <= 1.5
+const trusted = event => window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.sender.getURL().startsWith(`${localOrigin}/`)
 const externalHosts = new Set(['osu.ppy.sh', 'osucollector.com', 'www.osucollector.com'])
 
 function openTrustedExternal(url) {
@@ -28,12 +33,19 @@ async function main() {
   }
 
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  Menu.setApplicationMenu(null)
+  try {
+    const saved = JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'appearance.json'), 'utf8'))
+    if (validZoom(saved.zoom)) zoomFactor = saved.zoom
+  } catch { /* First launch or invalid preference: use 100%. */ }
   window = new BrowserWindow({
     width: 1230, height: 870, minWidth: 390, minHeight: 600,
-    title: 'PACC-BD', backgroundColor: '#1b151b', show: false,
+    title: 'PACC-BD', backgroundColor: '#000000', show: false, autoHideMenuBar: true,
     icon: path.join(app.getAppPath(), 'build', 'icons', 'icon.png'),
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
   })
+  window.setMenu(null)
+  window.webContents.on('did-finish-load', () => window?.webContents.setZoomFactor(zoomFactor))
   window.once('ready-to-show', () => window?.show())
   window.webContents.setWindowOpenHandler(({ url }) => { openTrustedExternal(url); return { action: 'deny' } })
   window.webContents.on('will-navigate', (event, url) => {
@@ -51,6 +63,24 @@ else {
     if (!window || event.sender !== window.webContents || !event.sender.getURL().startsWith(`${localOrigin}/`)) return null
     const result = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
+  })
+  ipcMain.handle('get-zoom', event => {
+    if (!trusted(event)) throw new Error('Untrusted window')
+    return zoomFactor
+  })
+  ipcMain.handle('set-zoom', (event, value) => {
+    if (!trusted(event) || !validZoom(value)) throw new Error('Invalid zoom')
+    zoomWriting = zoomWriting.catch(() => {}).then(async () => {
+      const directory = app.getPath('userData')
+      const file = path.join(directory, 'appearance.json')
+      await fs.mkdir(directory, { recursive: true })
+      await fs.writeFile(`${file}.tmp`, JSON.stringify({ zoom: value }))
+      await fs.rename(`${file}.tmp`, file)
+      zoomFactor = value
+      window?.webContents.setZoomFactor(value)
+      return value
+    })
+    return zoomWriting
   })
   app.whenReady().then(main).catch(error => {
     console.error(error)

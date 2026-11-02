@@ -9,6 +9,7 @@ import { migrateLegacyState } from './migration.js'
 import { resolveOsuInputs } from './osu.js'
 import { StableManager } from './stable.js'
 import { checkForUpdate } from './updates.js'
+import { exportLazerCollection, lazerPreview } from './lazerExport.js'
 
 export type ServerOptions = { port?: number; root: string; production?: boolean; updateRequest?: typeof fetch }
 export async function startServer({ port = 4387, root, production = false, updateRequest = fetch }: ServerOptions): Promise<{ server: Server; port: number; queue: Queue }> {
@@ -60,12 +61,21 @@ export async function startServer({ port = 4387, root, production = false, updat
   app.post('/api/queue/clear', route(async (_req, res) => { await queue.clearQueue(); res.json({ ok: true }) }))
   app.post('/api/theme', route(async (req, res) => { await queue.setTheme(req.body?.theme); res.json({ ok: true }) }))
   app.get('/api/stable', route(async (_req, res) => { res.json(await stable.list()) }))
+  app.get('/api/stable/progress', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(stable.scanProgress()) })
   app.get('/api/stable/collection', route(async (req, res) => { res.json(await stable.collection(String(req.query.name || ''))) }))
-  app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''), { starsMin: req.query.starsMin, starsMax: req.query.starsMax, bpmMin: req.query.bpmMin, bpmMax: req.query.bpmMax, includeUnknown: req.query.includeUnknown })) }))
+  app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''), req.query)) }))
   app.get('/api/stable/preview', route(async (req, res) => { res.json(await stable.preview(req.query.source as 'collector' | 'tournament')) }))
   app.post('/api/stable/connect', route(async (req, res) => { res.json(await stable.connect(req.body?.directory)) }))
   app.post('/api/stable/refresh', route(async (_req, res) => { res.json(await stable.list(true)) }))
   app.post('/api/stable/edit', route(async (req, res) => { res.json(await stable.edit(req.body || {})) }))
+  // Export only. Never open, migrate, or modify lazer's live Realm database.
+  app.get('/api/lazer/preview', route(async (req, res) => { res.json(lazerPreview(queue, req.query.source)) }))
+  app.get('/api/lazer/export', route(async (req, res) => {
+    const result = exportLazerCollection(queue, req.query)
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Content-Disposition', 'attachment; filename="collection.db"')
+    res.type('application/octet-stream').send(result.bytes)
+  }))
   app.post('/api/settings', route(async (req, res) => {
     if (typeof req.body?.directory !== 'string' || typeof req.body?.mirror !== 'string') throw new Error('Invalid settings.')
     await queue.settings({ directory: req.body.directory, mirror: req.body.mirror }); res.json({ ok: true })

@@ -1,7 +1,7 @@
 {
   "name": "pacc-bd",
   "private": true,
-  "version": "1.3.1",
+  "version": "1.4.0",
   "license": "MIT",
   "description": "Local osu! Collector and tournament beatmap downloader for Panama Accuracy",
   "homepage": "https://github.com/jsposu/pacc-bd",
@@ -16,7 +16,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build:all": "npm run build && npm run build:server",
     "desktop": "npm run build:all && electron .",
-    "dist:linux": "electron-builder --linux AppImage deb --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never",
     "dist:win": "electron-builder --win nsis --publish never",
     "test": "tsx --test tests/*.test.ts"
   },

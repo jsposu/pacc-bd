@@ -9,19 +9,16 @@ files:
   - build/icons/**/*
   - electron/**/*
   - package.json
+  - THIRD_PARTY_NOTICES.md
   - '!**/*.map'
 asar: true
 linux:
   syncDesktopName: true
   target:
     - AppImage
-    - deb
   category: Game
   icon: build/icons
   artifactName: PACC-BD-${version}-linux-${arch}.${ext}
-deb:
-  synopsis: Local osu! Collector and tournament beatmap downloader
-  description: Preview public collections and tournament IDs, then download selected beatmapsets.
 win:
   target:
     - nsis

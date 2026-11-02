@@ -55,7 +55,6 @@ jobs:
           name: ${{ matrix.artifact }}
           path: |
             release/*.AppImage
-            release/*.deb
             release/*-setup.exe
           if-no-files-found: error
 
@@ -78,5 +77,5 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cd artifacts
-          sha256sum *.AppImage *.deb *-setup.exe > SHA256SUMS
-          gh release create "$TAG" *.AppImage *.deb *-setup.exe SHA256SUMS --title "PACC-BD $TAG" --generate-notes
+          sha256sum *.AppImage *-setup.exe > SHA256SUMS
+          gh release create "$TAG" *.AppImage *-setup.exe SHA256SUMS --title "PACC-BD $TAG" --generate-notes
