@@ -211,14 +211,16 @@ test('cancelling a partially streamed file removes only its temporary file', asy
   await q.settings({ directory: path.join(dir, 'out'), mirror: 'direct' })
   await q.setCollection(coll)
   await q.enqueue(44, [1])
+  const part = path.join(dir, 'out', `${q.state.queue[0].filename}.pacc-bd.part`)
   await new Promise<void>((resolve, reject) => {
     const start = Date.now()
-    const interval = setInterval(() => {
-      if (q.state.queue[0]?.bytes > 0) { clearInterval(interval); resolve() }
-      else if (Date.now() - start > 3000) { clearInterval(interval); reject(new Error('No bytes streamed')) }
-    }, 10)
+    const check = async () => {
+      if ((await fs.stat(part).catch(() => null))?.size === 2048) return resolve()
+      if (Date.now() - start > 5000) return reject(new Error('No bytes written to the partial file'))
+      setTimeout(() => { void check() }, 10)
+    }
+    void check()
   })
-   const part = path.join(dir, 'out', `${q.state.queue[0].filename}.pacc-bd.part`)
   assert.equal((await fs.stat(part)).size, 2048)
   await q.cancel()
   await new Promise(resolve => setTimeout(resolve, 100))
