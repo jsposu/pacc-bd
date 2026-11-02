@@ -48,6 +48,7 @@ export class Queue {
     })
     return this.writing
   }
+  persist(): Promise<void> { return this.save() }
   private async recover(): Promise<void> {
     for (const item of this.state.queue) {
       // Only remove temporary files for jobs recorded by this app.
@@ -81,6 +82,11 @@ export class Queue {
   async setCollection(collection: Collection): Promise<void> {
     this.state.collections = [collection, ...this.state.collections.filter(c => c.id !== collection.id)].slice(0, 20)
     this.state.currentId = collection.id
+    await this.save()
+  }
+  async clearCollections(): Promise<void> {
+    this.state.collections = []
+    this.state.currentId = null
     await this.save()
   }
   async setTournament(manifest: TournamentManifest): Promise<void> {

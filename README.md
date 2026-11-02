@@ -26,14 +26,20 @@ Open **http://127.0.0.1:4387**. The source server only listens on `127.0.0.1`; i
 
 ## Use
 
-The interface has two separate sections:
+Switch sections using the tabs in the upper-left corner; only the selected downloader is shown:
 
 - **osu! Collector downloader:** Paste a public Collector collection URL or numeric collection ID, preview the collection, then search and select difficulty chips, whole sets, visible rows, or **Download all**.
-- **Tournament IDs:** Paste up to **200** osu! beatmap (difficulty) IDs, beatmapset IDs, or `https://osu.ppy.sh/beatmaps/{id}` and `https://osu.ppy.sh/beatmapsets/{id}` links, separated by newlines, spaces, commas or semicolons. Links with `#osu/{difficultyId}` (or taiko/fruits/mania) specify a difficulty. Choose whether **plain numbers** are difficulty IDs or beatmapset IDs; links identify their own type. Preview first, review any unresolved IDs, select sets, and click **Download selected** or **Download all**. Previewing never starts a download.
+- **Beatmap ID:** Paste up to **200** osu! beatmap (difficulty) IDs, beatmapset IDs, or `https://osu.ppy.sh/beatmaps/{id}` and `https://osu.ppy.sh/beatmapsets/{id}` links, separated by newlines, spaces, commas or semicolons. Links with `#osu/{difficultyId}` (or taiko/fruits/mania) specify a difficulty. Choose whether **plain numbers** are difficulty IDs or beatmapset IDs; links identify their own type. Preview first, review any unresolved IDs, select sets, and click **Download selected** or **Download all**. Previewing never starts a download.
 
-Both sections share **one deduplicated queue**. If multiple difficulties belong to one beatmapset, only one `.osz` is downloaded; a `.osz` usually contains the entire set. Difficulty IDs and available checksums remain in saved previews. **Pause** allows the current file to finish but starts no new one; **Cancel** stops active work while preserving completed files; **Retry failed** retries using the configured mirror. The EN/ES language switch is saved locally in the browser. The sample Collector rows on first launch are fictional and cannot be downloaded.
+Both sections share **one deduplicated queue**. If multiple difficulties belong to one beatmapset, only one `.osz` is downloaded; a `.osz` usually contains the entire set. Difficulty IDs and available checksums remain in saved previews. **Pause** allows the current file to finish but starts no new one; **Cancel** stops active work while preserving completed files; **Retry failed** retries using the configured mirror. The EN/ES language switch is saved locally in the browser. **Clear recent** removes saved Collector previews only; it leaves the queue and downloaded files untouched.
 
 By default, downloads go to `~/Downloads/PACC-BD` (Windows: `%USERPROFILE%\Downloads\PACC-BD`); change the absolute folder and public mirror in **Settings**. Import downloaded `.osz` files into osu! yourself. “Downloaded here” only means the saved file was verified by this app; it does not mean installed in osu!.
+
+### Manage osu!stable collections
+
+Open **Manage osu!stable collections** from either downloader section, then choose the **osu!stable installation folder** containing `collection.db` and `Songs` (not the download folder). Create, rename or delete collections; search installed difficulties; or select imported maps from the current preview and add them to a collection. You can also remove selected entries from a collection without deleting their beatmap files. PACC-BD computes the MD5 checksum of installed `.osu` files to match osu!stable's collections. If a preview map cannot be matched, import its downloaded `.osz` into osu!stable first, then use **Refresh Songs**. Set-only previews without difficulty checksums can be found through the Songs search after import. There is **no automatic import**.
+
+**Close osu!stable before editing** and tick the confirmation checkbox. The app checks for a running `osu!.exe`, refuses stale database revisions and malformed databases, and saves a copy of the original `collection.db` to `~/.pacc-bd/stable-backups/` (Windows: `%USERPROFILE%\.pacc-bd\stable-backups\`) **before every edit**. If `PACC_BD_DATA_DIR` is set, backups go to its `stable-backups/` folder. Changes to the game database are written through a temporary file. Keep your own additional backups, especially before editing a real library; reopen osu!stable after edits to see the changes. This feature targets **osu!stable**, not osu!lazer.
 
 ## Saved state and migration
 
@@ -49,6 +55,6 @@ The app uses an osu!-inspired interface but is implemented independently. For Co
 
 ## Verify
 
-Run `npm run build:all` and `npm test`. Tests cover ID parsing, osu! page metadata and redirects, failure reporting, shared-queue deduplication, legacy migration and partial recovery, Collector pagination, archive verification, cancellation, mirror limits, and production loopback security. A small live check previewed difficulty **188318**, displayed an unresolved ID, downloaded beatmapset **63834** (7,055,248 bytes) through osu.direct into an isolated test folder, validated the `.osz`, and confirmed that enqueueing it again added **zero** jobs. No bulk tournament downloads were run.
+Run `npm run build:all` and `npm test`. Tests cover ID parsing, osu! page metadata and redirects, failure reporting, shared-queue deduplication, legacy migration and partial recovery, Collector pagination, archive verification, cancellation, mirror limits, production loopback security, and isolated osu!stable database edits/backups. A small live check previewed difficulty **188318**, displayed an unresolved ID, downloaded beatmapset **63834** (7,055,248 bytes) through osu.direct into an isolated test folder, validated the `.osz`, and confirmed that enqueueing it again added **zero** jobs. No bulk tournament downloads were run.
 
 Release workflow: `.github/workflows/build.yml` builds and smoke-tests both platforms. Push a version tag such as `v1.0.0` to publish the tested installers and `SHA256SUMS` to GitHub Releases. For local Linux builds, run `npm run build:all` followed by `npm run dist:linux`. Windows installers are produced on the Windows runner with `npm run dist:win`.

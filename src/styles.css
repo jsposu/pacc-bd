@@ -190,3 +190,73 @@ footer span:first-child{font-weight:800;letter-spacing:.12em;color:#ffe3f0;white
 .tournament-failures ul{padding-left:16px;max-height:190px;overflow:auto;line-height:1.6;overflow-wrap:anywhere}
 .tournament-failures code{color:#fff;font-size:10px}
 @media(max-width:600px){.tournament-input-panel{padding:19px 16px}.tournament-input-actions button{margin-left:0;width:100%}.tournament-failures{padding:14px 16px}}
+
+/* Desktop and page scrolling retain native wheel/keyboard behaviour, with a
+   visible track that fits the app instead of Chromium's bright default. */
+html,.map-list,.queue-list,.stable-map-list,.stable-collection-list{scrollbar-width:thin;scrollbar-color:#966078 #261d25}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:#261d25}
+::-webkit-scrollbar-thumb{background:#966078;border:2px solid #261d25;border-radius:12px}
+::-webkit-scrollbar-thumb:hover{background:#e27ba9}
+.section-switch{display:flex;gap:4px;padding:4px;border:1px solid #ffffff4a;border-radius:24px;background:#382035}
+.section-switch button{border:0;background:transparent;color:#f5d4e4;border-radius:20px;padding:8px 13px;font-size:11px;font-weight:800;white-space:nowrap}
+.section-switch button.current{background:#ff81b8;color:#361d2b}
+.section-switch button:not(.current):hover{background:#ffffff26}
+.section-switch .tab-short{display:none}
+.brand{gap:22px}
+.page{padding-top:19px}
+.page-heading{padding:12px 22px}
+.page-mark{background:#f264a5;border:2px solid #ffd6e9;width:42px;height:42px;box-shadow:none}
+.page-mark span{width:auto;height:auto;background:transparent;font:800 12px 'Outfit',sans-serif;color:#fff;border-radius:0;letter-spacing:-.07em}
+.team-cover{height:70px;aspect-ratio:auto;background:#fafafa;display:flex;justify-content:center;align-items:center;padding:5px 15px}
+.team-cover img{max-width:350px;max-height:60px;width:100%;height:100%;object-fit:contain}
+.intro-profile{min-height:78px;padding:14px 24px;align-items:center;gap:13px}
+.team-avatar{height:55px;width:75px;margin:0;border-radius:11px;border:2px solid #70505e}
+.intro-copy h2{font-size:22px;margin:3px 0 0}
+.import-section{padding:18px 24px 20px}
+.tournament-input-panel{padding:18px 24px}
+.collector-empty{padding:18px 24px 24px;color:#cdb4c2;font-size:12px}
+.collection-panel:has(.collector-empty) .panel-head{padding-bottom:2px}
+.stable-toggle{padding:2px 0}
+.stable-toggle .rotate{transform:rotate(180deg)}
+.recent-heading{display:flex;align-items:center;justify-content:space-between;gap:15px}
+.recent-heading button{border:0;background:transparent;color:#ff9bc9;font-size:11px;font-weight:700;padding:6px 2px}
+.stable-panel{background:var(--panel);padding:22px 24px;border-radius:12px;min-width:0}
+.stable-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stable-heading h2{font:650 21px 'Outfit',sans-serif;margin:5px 0 0}
+.stable-heading .secondary-button{font-size:10px;min-height:34px}
+.stable-hint,.stable-warning{font-size:11px;color:#d7bdc9;line-height:1.5;margin:12px 0}
+.stable-warning{border-top:1px solid #65505a;padding-top:12px}
+.stable-path label{display:block;color:#f5deea;font-size:11px;font-weight:700;margin-bottom:7px}
+.stable-path>div,.stable-create,.stable-rename,.stable-search,.stable-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.stable-path input,.stable-create input,.stable-rename input,.stable-search input{background:#231a22;color:#fff;border:1px solid #775666;border-radius:8px;padding:10px;min-width:0;font-size:12px;flex:1}
+.stable-path>div button,.stable-create button,.stable-rename button,.stable-search button,.stable-actions button{font-size:10px;min-height:36px}
+.stable-count{color:#f4c2da;font-size:11px;margin:18px 0 10px}
+.stable-confirm{font-size:11px;color:#fff1f7;display:flex;align-items:center;gap:7px;margin-bottom:12px;line-height:1.4}
+.stable-confirm input,.stable-map input{accent-color:#f268a5;flex:none}
+.stable-create{margin-bottom:18px}
+.stable-layout{display:grid;grid-template-columns:minmax(110px,32%) minmax(0,1fr);gap:13px}
+.stable-collection-list{border:1px solid #624b57;border-radius:8px;max-height:420px;overflow:auto}
+.stable-collection-list button{display:flex;width:100%;justify-content:space-between;align-items:center;gap:8px;padding:10px;border:0;border-bottom:1px solid #624b57;color:#f7e6ed;background:transparent;text-align:left;overflow-wrap:anywhere;font-size:11px}
+.stable-collection-list button.active,.stable-collection-list button:hover{background:#80506a}
+.stable-collection-list button small{color:#f6bedb}
+.stable-collection-list p,.stable-map-list p{padding:10px;color:#d9bdca;font-size:11px}
+.stable-detail{min-width:0}
+.stable-rename{flex-wrap:nowrap}
+.stable-rename .icon-button{flex:none}
+.stable-subheading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:16px 0 8px;font-size:11px}
+.stable-subheading button{border:0;color:#ff9bc9;background:none;font-size:10px;font-weight:700}
+.stable-map-list{max-height:180px;overflow-y:auto;border:1px solid #624b57;border-radius:7px}
+.stable-map{display:flex;gap:9px;align-items:center;border-bottom:1px solid #624b57;padding:8px 10px;cursor:pointer}
+.stable-map:last-child{border-bottom:0}
+.stable-map span{min-width:0;display:block}
+.stable-map strong,.stable-map small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stable-map strong{font-size:11px;color:#fff0f8}
+.stable-map small{font-size:10px;color:#c9adbb;margin-top:3px}
+.stable-search{flex-wrap:nowrap;margin-bottom:8px}
+.stable-actions{margin-top:12px}
+.stable-message{display:flex;gap:8px;align-items:center;padding:8px 10px;margin:10px 0;color:#f8dded;font-size:11px;overflow-wrap:anywhere}
+.stable-message.error{background:#64364a}.stable-message.success{background:#355446}
+@media(max-width:800px){.header-inner{flex-wrap:wrap;padding-top:10px;padding-bottom:10px}.brand{flex-wrap:wrap;gap:10px}.section-switch{order:3;width:100%}.section-switch button{flex:1}.section-switch .tab-full{display:none}.section-switch .tab-short{display:inline}}
+@media(max-width:600px){.team-cover{height:58px}.team-cover img{max-height:50px}.intro-profile{padding:12px 16px;min-height:70px}.team-avatar{height:47px;width:64px;margin:0;float:none}.intro-copy h2{font-size:17px}.import-section,.tournament-input-panel{padding:18px 16px}.stable-panel{padding:17px 14px}.stable-layout{grid-template-columns:1fr}.stable-collection-list{max-height:150px}.stable-heading{align-items:flex-start}.stable-heading h2{font-size:18px}.stable-path>div button{flex:1}}
+@media(max-width:440px){.team-cover{height:50px}.team-cover img{max-height:44px}.section-switch button{padding:8px 5px;font-size:10px}.page-mark{width:38px;height:38px}.intro-profile{display:flex}.stable-path>div input{flex-basis:100%}}

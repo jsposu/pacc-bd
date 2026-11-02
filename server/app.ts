@@ -7,6 +7,7 @@ import { fetchCollection, parseCollectionId } from './collector.js'
 import { Queue } from './queue.js'
 import { migrateLegacyState } from './migration.js'
 import { resolveOsuInputs } from './osu.js'
+import { StableManager } from './stable.js'
 
 export type ServerOptions = { port?: number; root: string; production?: boolean }
 export async function startServer({ port = 4387, root, production = false }: ServerOptions): Promise<{ server: Server; port: number; queue: Queue }> {
@@ -17,6 +18,7 @@ export async function startServer({ port = 4387, root, production = false }: Ser
     await migrateLegacyState(path.join(homedir(), '.aimthmus', 'state.json'), stateFile)
   }
   const queue = await Queue.open(stateFile)
+  const stable = new StableManager(queue)
   const app = express()
   app.disable('x-powered-by')
   let actualPort = port
@@ -48,6 +50,13 @@ export async function startServer({ port = 4387, root, production = false }: Ser
     } finally { resolvingTournament = false }
   }))
   app.post('/api/show', route(async (req, res) => { await queue.showCollection(Number(req.body?.id)); res.json({ ok: true }) }))
+  app.post('/api/collections/clear', route(async (_req, res) => { await queue.clearCollections(); res.json({ ok: true }) }))
+  app.get('/api/stable', route(async (_req, res) => { res.json(await stable.list()) }))
+  app.get('/api/stable/collection', route(async (req, res) => { res.json(await stable.collection(String(req.query.name || ''))) }))
+  app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''))) }))
+  app.post('/api/stable/connect', route(async (req, res) => { res.json(await stable.connect(req.body?.directory)) }))
+  app.post('/api/stable/refresh', route(async (_req, res) => { res.json(await stable.list(true)) }))
+  app.post('/api/stable/edit', route(async (req, res) => { res.json(await stable.edit(req.body || {})) }))
   app.post('/api/settings', route(async (req, res) => {
     if (typeof req.body?.directory !== 'string' || typeof req.body?.mirror !== 'string') throw new Error('Invalid settings.')
     await queue.settings({ directory: req.body.directory, mirror: req.body.mirror }); res.json({ ok: true })

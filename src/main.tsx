@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowDownToLine, ArrowRight, Check, ChevronDown, CircleHelp, Clock3, FolderOpen, LoaderCircle, Pause, Play, RefreshCcw, Search, Settings2, Square, X } from 'lucide-react'
 import { copy, localizeError, type Language, type TranslationKey } from './i18n'
+import { StablePanel } from './StablePanel'
 import './styles.css'
 
 declare global { interface Window { paccDesktop?: { chooseDirectory(): Promise<string | null> } } }
@@ -12,12 +13,6 @@ type Item = { key: string; collectionId: number; collectionName: string; beatmap
 type TournamentEntry = { source: string; kind: 'beatmap' | 'beatmapset'; requestedId: number; beatmapsetId: number; difficultyId: number | null; checksum: string | null; version: string | null; stars: number | null; artist: string; title: string; creator: string; cover: string | null; status: string }
 type TournamentManifest = { entries: TournamentEntry[]; failures: { source: string; reason: string }[]; fetchedAt: string }
 type State = { settings: { directory: string; mirror: 'direct' | 'catboy' }; collections: Collection[]; currentId: number | null; queue: Item[]; paused: boolean; tournament?: TournamentManifest }
-
-const sampleMaps: Difficulty[] = [
-  ['Afterglow', 'Night Drive', 'Kairo', 5.82, 'Insane'],
-  ['Coastline', 'Blue Hour', 'Mira', 4.67, 'Another'],
-  ['Paper Skies', 'Distant Signals', 'ren', 6.19, 'Extra'],
-].map(([artist, title, creator, stars, version], i) => ({ id: i + 1, beatmapsetId: i + 1, checksum: null, version: String(version), mode: 'osu', stars: Number(stars), status: 'sample', artist: String(artist), title: String(title), creator: String(creator), cover: null, bpm: null, length: null }))
 
 async function api<T = unknown>(url: string, body?: object): Promise<T> {
   const response = await fetch(`/api/${url}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined)
@@ -65,7 +60,8 @@ function App() {
   const [numberKind, setNumberKind] = useState<'beatmap' | 'beatmapset'>('beatmap')
   const [tournamentBusy, setTournamentBusy] = useState(false)
   const [selectedTournament, setSelectedTournament] = useState<Set<number>>(new Set())
-  const [activeSection, setActiveSection] = useState<'collector' | 'tournament'>('collector')
+  const [activeSection, setActiveSection] = useState<'collector' | 'tournament'>(() => { try { return localStorage.getItem('pacc-bd-section') === 'tournament' ? 'tournament' : 'collector' } catch { return 'collector' } })
+  const [stableOpen, setStableOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -82,9 +78,10 @@ function App() {
     const timer = window.setInterval(() => { void refresh().catch(() => {}) }, 1100)
     return () => window.clearInterval(timer)
   }, [])
+  useEffect(() => { try { localStorage.setItem('pacc-bd-section', activeSection) } catch { /* optional preference */ } }, [activeSection])
 
   const live = state?.collections.find(c => c.id === state.currentId)
-  const collection: Collection = live || { id: 0, name: t('sampleTitle'), uploader: t('sampleBy'), reportedCount: sampleMaps.length, maps: sampleMaps, fetchedAt: '' }
+  const collection: Collection = live || { id: 0, name: t('collectorReady'), uploader: '', reportedCount: 0, maps: [], fetchedAt: '' }
   const isDemo = !live
   const groups = useMemo(() => group(collection.maps), [collection.maps])
   const visible = useMemo(() => groups.filter(maps => `${maps[0].artist} ${maps[0].title} ${maps[0].creator} ${maps.map(m => m.version).join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [groups, query])
@@ -99,6 +96,10 @@ function App() {
     for (const entry of state?.tournament?.entries || []) sets.set(entry.beatmapsetId, [...(sets.get(entry.beatmapsetId) || []), entry])
     return [...sets]
   }, [state?.tournament])
+  const sourceChecksums = [...new Set([
+    ...collection.maps.filter(map => selected.has(map.id)).map(map => map.checksum),
+    ...(state?.tournament?.entries || []).filter(entry => selectedTournament.has(entry.beatmapsetId)).map(entry => entry.checksum),
+  ].filter((hash): hash is string => !!hash))]
 
   async function action(route: string, body: object = {}) {
     setError(''); setNotice('')
@@ -144,21 +145,21 @@ function App() {
 
   return <div className="app-shell">
     <header className="site-header"><div className="header-inner">
-      <div className="brand"><div className="app-name">PACC<span>-BD</span><small>{t('tagline')}</small></div><span className="header-divider" aria-hidden="true" /><span className="header-creator">{t('by')} <strong>osakari</strong><small>VIBECODED</small></span></div>
+      <div className="brand"><div className="app-name">PACC<span>-BD</span><small>{t('tagline')}</small></div><nav className="section-switch" aria-label={t('mode')}><button type="button" className={activeSection === 'collector' ? 'current' : ''} aria-current={activeSection === 'collector' ? 'page' : undefined} onClick={() => { setActiveSection('collector'); setError(''); setNotice('') }}><span className="tab-full">{t('collectorTab')}</span><span className="tab-short">{t('collectorTabShort')}</span></button><button type="button" className={activeSection === 'tournament' ? 'current' : ''} aria-current={activeSection === 'tournament' ? 'page' : undefined} onClick={() => { setActiveSection('tournament'); setError(''); setNotice('') }}><span className="tab-full">{t('beatmapTab')}</span><span className="tab-short">{t('beatmapTabShort')}</span></button></nav></div>
       <div className="header-actions"><span className="local-indicator"><i />{t('local')}</span><div className="language-switch" role="group" aria-label={t('language')}><button type="button" aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => changeLanguage('en')}>EN</button><button type="button" aria-pressed={language === 'es'} className={language === 'es' ? 'current' : ''} onClick={() => changeLanguage('es')}>ES</button></div></div>
     </div></header>
 
     <main className="page">
       <section className="intro">
-        <div className="page-heading"><div className="page-mark" aria-hidden="true"><span /></div><div><span className="eyebrow">{t('eyebrow')}</span><h1>PACC-BD</h1></div></div>
+        <div className="page-heading"><div className="page-mark" aria-hidden="true"><span>osu!</span></div><div><span className="eyebrow">{t('eyebrow')}</span><h1>PACC-BD</h1></div></div>
         <a className="team-cover" href="https://osu.ppy.sh/teams/15959" target="_blank" rel="noopener noreferrer" title={t('source')} aria-label={t('source')}><img src="/panama-accuracy-wordmark.png" alt="Panama Accuracy" /></a>
-        <div className="intro-profile"><a className="team-avatar" href="https://osu.ppy.sh/teams/15959" target="_blank" rel="noopener noreferrer" title={t('source')} aria-label={t('source')}><img src="/panama-accuracy-flag.png" alt="" /></a><div className="intro-copy"><span className="eyebrow">{t('forTeam')}</span><h2>{t('heroOne')} {t('heroTwo')}</h2><p>{t('intro')}</p><span className="made-by">{t('credit')}</span></div></div>
+        <div className="intro-profile"><a className="team-avatar" href="https://osu.ppy.sh/teams/15959" target="_blank" rel="noopener noreferrer" title={t('source')} aria-label={t('source')}><img src="/panama-accuracy-flag.png" alt="" /></a><div className="intro-copy"><span className="eyebrow">{t('forTeam')}</span><h2>{t('heroOne')} {t('heroTwo')}</h2></div></div>
       </section>
 
-      <section className="import-section" aria-label={t('collectorSection')}>
+      {activeSection === 'collector' ? <section className="import-section" aria-label={t('collectorSection')}>
         <h2 className="import-heading">{t('collectorSection')}</h2>
         <form className="import-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void loadCollection(input) }}><label htmlFor="collection-input">{t('collectionInput')}</label><div className="input-line"><input id="collection-input" type="text" required autoComplete="off" placeholder={t('inputPlaceholder')} value={input} onChange={e => setInput(e.target.value)} /><button className="primary-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle size={16} className="spin" />{t('fetching')}</> : <>{t('fetch')} <ArrowRight size={16} /></>}</button></div></form>
-      </section>
+      </section> :
 
       <section className="tournament-input-panel" aria-label={t('tournamentSection')}>
         <h2 className="import-heading">{t('tournamentSection')}</h2><p>{t('tournamentHint')}</p>
@@ -167,30 +168,33 @@ function App() {
           <textarea id="tournament-input" required maxLength={30000} value={tournamentInput} onChange={e => setTournamentInput(e.target.value)} placeholder={t('tournamentPlaceholder')} rows={4} />
           <div className="tournament-input-actions"><label htmlFor="number-kind">{t('numericIds')}</label><select id="number-kind" value={numberKind} onChange={e => setNumberKind(e.target.value as 'beatmap' | 'beatmapset')}><option value="beatmap">{t('beatmapId')}</option><option value="beatmapset">{t('beatmapsetId')}</option></select><button type="submit" className="primary-button" disabled={tournamentBusy}>{tournamentBusy ? <><LoaderCircle size={16} className="spin" />{t('resolving')}</> : <>{t('previewIds')} <ArrowRight size={16} /></>}</button></div>
         </form>
-      </section>
+      </section>}
 
       {error && <div className="alert error" role="alert"><CircleHelp size={16} />{localizeError(error, language)}<button type="button" aria-label={t('dismissError')} onClick={() => setError('')}><X size={16} /></button></div>}
       {notice && <div className="alert success" role="status"><Check size={16} />{notice}<button type="button" aria-label={t('dismissNotice')} onClick={() => setNotice('')}><X size={16} /></button></div>}
 
       <div className="workspace">
-        <div className={`preview-panels ${activeSection === 'tournament' || (!live && !!state?.tournament?.entries.length) ? 'tournament-first' : ''}`}><section className="collection-panel" aria-label={t('collection')}>
-          <div className="panel-head"><div><span className="section-label">{t('collection')}</span><h2>{collection.name}</h2><p>{isDemo ? t('sampleBy') : <>{t('by')} <strong>{collection.uploader}</strong> <span className="subtle-separator">·</span> Collector #{collection.id}</>}</p></div>{isDemo && <span className="sample-tag">{t('demo')}</span>}</div>
-          {isDemo && <div className="sample-note">{t('demoExplain')}</div>}
+        <div className="preview-panels">{activeSection === 'collector' ? <><section className="collection-panel" aria-label={t('collection')}>
+           <div className="panel-head"><div><span className="section-label">{t('collection')}</span><h2>{collection.name}</h2>{!isDemo && <p>{t('by')} <strong>{collection.uploader}</strong> <span className="subtle-separator">·</span> Collector #{collection.id}</p>}</div></div>
+           {isDemo ? <div className="collector-empty">{t('collectorEmpty')}</div> : <>
           <div className="stats"><span><b>{collection.maps.length}</b>{t('difficulties')}</span><span><b>{groups.filter(g => g[0].beatmapsetId).length}</b>{t('beatmapsets')}</span><span><b>{isDemo ? '—' : selected.size}</b>{t('selected')}</span></div>
           <div className="map-tools"><div className="search-box"><Search size={17} /><input aria-label={t('searchLabel')} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('search')} /></div><span className="map-count">{visible.length} {t('results')}</span></div>
           <div className="selection-tools"><span>{selected.size} / {available.length} {t('selected')}</span><div><button type="button" disabled={isDemo} onClick={() => setSelected(previous => new Set([...previous, ...visible.flat().filter(m => m.beatmapsetId).map(m => m.id)]))}>{t('selectVisible')}</button><button type="button" disabled={isDemo || !selected.size} onClick={() => setSelected(new Set())}>{t('clear')}</button></div></div>
 
           <div className="map-list">{visible.length === 0 ? <div className="empty-list">{t('emptySearch')}</div> : visible.map(maps => { const map = maps[0]; const ids = maps.filter(m => m.beatmapsetId).map(m => m.id); const checked = ids.length > 0 && ids.every(id => selected.has(id)); const queued = already(map.beatmapsetId); return <article className={`map-row ${checked ? 'is-selected' : ''}`} key={map.beatmapsetId || `missing-${map.id}`}><MapBackground src={map.cover} /><label className="map-checkbox"><input type="checkbox" disabled={isDemo || !ids.length} checked={checked} onChange={() => toggle(ids)} aria-label={`${t('selectMap')} ${map.artist} - ${map.title}`} /><span /></label><div className="map-details"><div className="map-title-line"><div className="map-title"><strong>{map.title}</strong><small>{map.artist} <span>·</span> {t('mappedBy')} {map.creator}</small></div><span className={`map-status ${queued?.status || ''}`}>{mapStatus(queued, map)}</span></div><div className="diff-list"><span className="diff-label">{t('diffLabel')}</span>{maps.map(diff => <button type="button" key={diff.id} title={`ID ${diff.id}${diff.checksum ? ` · MD5 ${diff.checksum}` : ''}`} disabled={isDemo || !diff.beatmapsetId} className={`diff-chip ${selected.has(diff.id) ? 'chosen' : ''}`} onClick={() => toggle([diff.id])}>{diff.version}{diff.stars !== null && <b>{diff.stars.toFixed(1)}★</b>}</button>)}</div></div></article> })}</div>
           <div className="osz-note"><CircleHelp size={16} />{t('oszNote')}</div>
-          <div className="collection-actions"><span>{isDemo ? t('sampleAction') : `${selectedSets} ${t('chosenSets')}`}</span><div><button type="button" className="secondary-button" disabled={isDemo || !available.length} onClick={() => void action('enqueue', { collectionId: collection.id, ids: available.map(m => m.id) })}>{t('downloadAll')}</button><button type="button" className="primary-button" disabled={isDemo || !selected.size} onClick={() => void action('enqueue', { collectionId: collection.id, ids: [...selected] })}><ArrowDownToLine size={16} />{t('downloadSelected')}</button></div></div>
+           <div className="collection-actions"><span>{selectedSets} {t('chosenSets')}</span><div><button type="button" className="secondary-button" disabled={!available.length} onClick={() => void action('enqueue', { collectionId: collection.id, ids: available.map(m => m.id) })}>{t('downloadAll')}</button><button type="button" className="primary-button" disabled={!selected.size} onClick={() => void action('enqueue', { collectionId: collection.id, ids: [...selected] })}><ArrowDownToLine size={16} />{t('downloadSelected')}</button></div></div></>}
         </section>
 
-        <section className="tournament-panel" aria-label={t('tournamentSection')}><div className="panel-head"><div><span className="section-label">{t('tournamentSection')}</span><h2>{t('tournamentPreview')}</h2><p>{state?.tournament ? `${state.tournament.entries.length} ${t('tournamentIds')} · ${tournamentSets.length} ${t('beatmapsets')}` : t('tournamentEmpty')}</p></div></div>
+        </> : <section className="tournament-panel" aria-label={t('tournamentSection')}><div className="panel-head"><div><span className="section-label">{t('tournamentSection')}</span><h2>{t('tournamentPreview')}</h2><p>{state?.tournament ? `${state.tournament.entries.length} ${t('tournamentIds')} · ${tournamentSets.length} ${t('beatmapsets')}` : t('tournamentEmpty')}</p></div></div>
           {tournamentSets.length > 0 && <><div className="selection-tools"><span>{selectedTournament.size} / {tournamentSets.length} {t('selected')}</span><div><button type="button" onClick={() => setSelectedTournament(new Set(tournamentSets.map(([id]) => id)))}>{t('selectAll')}</button><button type="button" disabled={!selectedTournament.size} onClick={() => setSelectedTournament(new Set())}>{t('clear')}</button></div></div>
             <div className="map-list">{tournamentSets.map(([id, entries]) => { const entry = entries[0]; const checked = selectedTournament.has(id); const queued = already(id); return <article className={`map-row ${checked ? 'is-selected' : ''}`} key={id}><MapBackground src={entry.cover} /><label className="map-checkbox"><input type="checkbox" checked={checked} onChange={() => setSelectedTournament(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next })} aria-label={`${t('selectMap')} ${entry.artist} - ${entry.title}`} /><span /></label><div className="map-details"><div className="map-title-line"><div className="map-title"><strong>{entry.title}</strong><small>{entry.artist} <span>·</span> {t('mappedBy')} {entry.creator}</small></div><span className={`map-status ${queued?.status || ''}`}>{queued ? queued.status === 'done' ? t('downloadedHere') : t(queued.status) : entry.status.toUpperCase()}</span></div><div className="diff-list"><span className="diff-label">{t('beatmapsetId')} #{id}</span>{entries.map(e => <span className="diff-chip" key={`${e.kind}-${e.requestedId}`} title={e.checksum ? `MD5 ${e.checksum}` : undefined}>{e.difficultyId ? `${e.version || t('beatmapId')} #${e.difficultyId}` : `${t('beatmapsetId')} #${id}`}{e.stars !== null && <b>{e.stars.toFixed(1)}★</b>}</span>)}</div></div></article> })}</div>
             <div className="osz-note"><CircleHelp size={16} />{t('oszNote')}</div><div className="collection-actions"><span>{selectedTournament.size} {t('chosenSets')}</span><div><button type="button" className="secondary-button" onClick={() => void action('tournament/enqueue', { ids: tournamentSets.map(([id]) => id) })}>{t('downloadAll')}</button><button type="button" className="primary-button" disabled={!selectedTournament.size} onClick={() => void action('tournament/enqueue', { ids: [...selectedTournament] })}><ArrowDownToLine size={16} />{t('downloadSelected')}</button></div></div></>}
           {!!state?.tournament?.failures.length && <div className="tournament-failures"><strong>{t('unresolved')} ({state.tournament.failures.length})</strong><ul>{state.tournament.failures.map((failure, i) => <li key={i}><code>{failure.source}</code> — {localizeError(failure.reason, language)}</li>)}</ul></div>}
-        </section></div>
+        </section>}
+        <div className="stable-toggle"><button type="button" className="secondary-button" onClick={() => setStableOpen(!stableOpen)} aria-expanded={stableOpen}>{t('stableTitle')} <ChevronDown size={15} className={stableOpen ? 'rotate' : ''} /></button></div>
+        {stableOpen && <StablePanel language={language} sourceChecksums={activeSection === 'collector' ? sourceChecksums.filter(hash => collection.maps.some(map => selected.has(map.id) && map.checksum === hash)) : sourceChecksums.filter(hash => state?.tournament?.entries.some(entry => selectedTournament.has(entry.beatmapsetId) && entry.checksum === hash))} />}
+        </div>
 
         <div className="side-panels"><section className="queue-panel" id="queue"><div className="side-heading"><div><span className="section-label">{t('queue')}</span><h2>{t('queue')} <small>{state?.queue.length || 0}</small></h2></div><button type="button" className="icon-button" aria-label={queueOpen ? t('collapse') : t('expand')} onClick={() => setQueueOpen(!queueOpen)}><ChevronDown size={17} className={queueOpen ? '' : 'rotate'} /></button></div>
           {queueOpen && <><div className="queue-progress"><div><span>{outstanding ? state?.paused ? t('paused') : t('inProgress') : failed ? t('attention') : state?.queue.length ? t('allDone') : t('ready')}</span><strong>{done} / {state?.queue.length || 0}</strong></div><div className="progress-track"><div style={{ width: `${state?.queue.length ? done / state.queue.length * 100 : 0}%` }} /></div><small>{done} {t('completed')} · {outstanding} {t('remaining')}</small></div>
@@ -203,7 +207,7 @@ function App() {
         </section><p className="installed-note">{t('installedNote')}</p></div>
       </div>
 
-      {!!state?.collections.length && <section className="recent"><span className="section-label">{t('recent')}</span><div>{state.collections.map(c => <button type="button" key={c.id} className={c.id === collection.id ? 'current' : ''} onClick={() => { void action('show', { id: c.id }); setSelected(new Set()); setQuery(''); setActiveSection('collector') }}>{c.name} <small>#{c.id}</small></button>)}</div></section>}
+      {activeSection === 'collector' && !!state?.collections.length && <section className="recent"><div className="recent-heading"><span className="section-label">{t('recent')}</span><button type="button" onClick={() => { if (window.confirm(t('clearRecentConfirm'))) { void action('collections/clear'); setSelected(new Set()); setQuery('') } }}>{t('clearRecent')}</button></div><div>{state.collections.map(c => <button type="button" key={c.id} className={c.id === collection.id ? 'current' : ''} onClick={() => { void action('show', { id: c.id }); setSelected(new Set()); setQuery(''); setActiveSection('collector') }}>{c.name} <small>#{c.id}</small></button>)}</div></section>}
       <footer><span>PACC-BD</span><span>{t('independent')}</span></footer>
     </main>
   </div>
