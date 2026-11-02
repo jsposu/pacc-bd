@@ -201,6 +201,44 @@ export class StableManager {
     return results
   }
 
+  async preview(source: 'collector' | 'tournament') {
+    if (source !== 'collector' && source !== 'tournament') throw new Error('Choose a supported preview source.')
+    const directory = await this.folder()
+    await this.scan(directory)
+    const byId = new Map<number, InstalledMap[]>()
+    const bySet = new Map<number, InstalledMap[]>()
+    for (const map of this.installed.values()) {
+      if (map.beatmapId) byId.set(map.beatmapId, [...(byId.get(map.beatmapId) || []), map])
+      if (map.beatmapsetId) bySet.set(map.beatmapsetId, [...(bySet.get(map.beatmapsetId) || []), map])
+    }
+    const current = this.queue.state.collections.find(c => c.id === this.queue.state.currentId)
+    const entries = source === 'collector'
+      ? (current?.maps || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.id, beatmapsetId: map.beatmapsetId }))
+      : (this.queue.state.tournament?.entries || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.difficultyId, beatmapsetId: map.beatmapsetId }))
+    const seen = new Set<string>()
+    const maps: { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; installed: InstalledMap | null }[] = []
+    let total = 0
+    const append = (entry: typeof entries[number], installed: InstalledMap | null) => {
+      const key = installed ? `hash:${installed.checksum}` : entry.checksum ? `missing:${entry.checksum.toLowerCase()}` : `missing:${entry.beatmapId || 0}:${entry.beatmapsetId || 0}`
+      if (seen.has(key)) return
+      seen.add(key)
+      total++
+      if (maps.length < 5000) maps.push({ key, artist: installed?.artist || entry.artist, title: installed?.title || entry.title, version: installed?.version || entry.version, beatmapId: installed?.beatmapId || entry.beatmapId, beatmapsetId: installed?.beatmapsetId || entry.beatmapsetId, installed })
+    }
+    for (const entry of entries) {
+      if (entry.checksum) append(entry, HASH.test(entry.checksum) ? this.installed.get(entry.checksum.toLowerCase()) || null : null)
+      else if (entry.beatmapId) {
+        const matches = byId.get(entry.beatmapId) || []
+        append(entry, matches.length === 1 ? matches[0] : null)
+      } else {
+        const matches = entry.beatmapsetId ? bySet.get(entry.beatmapsetId) || [] : []
+        if (matches.length) for (const match of matches) append(entry, match)
+        else append(entry, null)
+      }
+    }
+    return { source, name: source === 'collector' ? current?.name || null : null, total, maps }
+  }
+
   async edit(data: { operation: string; name?: string; newName?: string; hashes?: string[]; revision?: string; confirmedClosed?: boolean }) {
     const work = this.writing.catch(() => {}).then(async () => {
       if (data.confirmedClosed !== true) throw new Error('Confirm that osu!stable is closed before editing collections.')

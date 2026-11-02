@@ -99,3 +99,35 @@ test('a game starting before commit prevents overwrite and leaves a recovery bac
   assert.equal((await fs.readdir(path.join(root, 'data', 'stable-backups'))).length, 1)
   assert.equal((await fs.readdir(directory)).filter(name => name.endsWith('.tmp')).length, 0)
 })
+
+test('saved Collector and ID previews match only imported maps, expanding set-only IDs after import', async t => {
+  const { directory, songs, manager, queue } = await fixture(t)
+  await fs.writeFile(path.join(songs, 'Hard.osu'), osu)
+  const other = Buffer.from(osu.toString().replace('Version:Hard', 'Version:Normal').replace('BeatmapID:12345', 'BeatmapID:54321'))
+  await fs.writeFile(path.join(songs, 'Normal.osu'), other)
+  await manager.connect(directory)
+  queue.state.currentId = 12
+  queue.state.collections = [{ id: 12, name: 'Collector set', uploader: '', reportedCount: 4, fetchedAt: '', maps: [
+    { id: 12345, beatmapsetId: 6789, checksum: hash, artist: 'An Artist', title: 'A Song', creator: 'Mapper', version: 'Hard', mode: 'osu', stars: 2, status: 'ranked', cover: null, bpm: null, length: null },
+    { id: 99999, beatmapsetId: 999, checksum: 'b'.repeat(32), artist: 'Not installed', title: 'Other song', creator: 'Mapper', version: 'Missing', mode: 'osu', stars: null, status: 'ranked', cover: null, bpm: null, length: null },
+    { id: 54321, beatmapsetId: 6789, checksum: null, artist: 'An Artist', title: 'A Song', creator: 'Mapper', version: 'Normal', mode: 'osu', stars: null, status: 'ranked', cover: null, bpm: null, length: null },
+    { id: 12345, beatmapsetId: 6789, checksum: 'c'.repeat(32), artist: 'An Artist', title: 'A Song', creator: 'Mapper', version: 'Changed checksum', mode: 'osu', stars: null, status: 'ranked', cover: null, bpm: null, length: null },
+  ] }]
+  const collector = await manager.preview('collector')
+  assert.equal(collector.name, 'Collector set')
+  assert.equal(collector.total, 4)
+  assert.equal(collector.maps.find(map => map.beatmapId === 12345)?.installed?.checksum, hash)
+  assert.equal(collector.maps.find(map => map.beatmapId === 54321)?.installed?.beatmapId, 54321)
+  assert.equal(collector.maps.find(map => map.beatmapId === 99999)?.installed, null)
+  assert.equal(collector.maps.find(map => map.key === `missing:${'c'.repeat(32)}`)?.installed, null, 'do not match a differing checksum by ID')
+  queue.state.tournament = { fetchedAt: '', failures: [], entries: [
+    { source: '6789', kind: 'beatmapset', requestedId: 6789, beatmapsetId: 6789, difficultyId: null, checksum: null, version: null, stars: null, artist: 'An Artist', title: 'A Song', creator: 'Mapper', cover: null, status: 'ranked' },
+    { source: '999', kind: 'beatmapset', requestedId: 999, beatmapsetId: 999, difficultyId: null, checksum: null, version: null, stars: null, artist: 'Not installed', title: 'Other song', creator: 'Mapper', cover: null, status: 'ranked' },
+  ] }
+  const ids = await manager.preview('tournament')
+  assert.equal(ids.maps.filter(map => map.installed).length, 2)
+  assert.equal(ids.maps.filter(map => !map.installed).length, 1)
+  const edit = await manager.edit({ operation: 'add', name: 'Target', hashes: ids.maps.filter(map => map.installed).map(map => map.installed!.checksum), revision: (await manager.list()).revision, confirmedClosed: true })
+  assert.equal(edit.collections.find(c => c.name === 'Target')?.count, 2)
+  await assert.rejects(manager.preview('invalid' as 'collector'), /supported preview source/)
+})

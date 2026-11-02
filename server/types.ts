@@ -59,4 +59,5 @@ export type QueueItem = {
   attempts: number
 }
 export type Settings = { directory: string; mirror: 'direct' | 'catboy' }
-export type State = { settings: Settings; collections: Collection[]; currentId: number | null; queue: QueueItem[]; paused: boolean; tournament?: TournamentManifest; stableDirectory?: string }
+export type Theme = 'team' | 'light' | 'oled'
+export type State = { settings: Settings; collections: Collection[]; currentId: number | null; queue: QueueItem[]; paused: boolean; tournament?: TournamentManifest; stableDirectory?: string; theme?: Theme }

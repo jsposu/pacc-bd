@@ -3,7 +3,7 @@ import path from 'node:path'
 import { setTimeout as wait } from 'node:timers/promises'
 import { defaultDirectory, ensureDirectory, filename, streamFile, validOsz } from './files.js'
 import { DownloadError, requestDownload } from './mirrors.js'
-import type { Collection, QueueItem, Settings, State, TournamentManifest } from './types.js'
+import type { Collection, QueueItem, Settings, State, Theme, TournamentManifest } from './types.js'
 
 const MAX_ATTEMPTS = 3
 const PACE_MS = 1600
@@ -87,6 +87,17 @@ export class Queue {
   async clearCollections(): Promise<void> {
     this.state.collections = []
     this.state.currentId = null
+    await this.save()
+  }
+  async clearQueue(): Promise<void> {
+    if (this.active || this.state.queue.some(item => item.status === 'pending' || item.status === 'downloading')) throw new Error('Cancel pending downloads and wait for the active file to stop before clearing the queue.')
+    this.state.queue = []
+    this.state.paused = false
+    await this.save()
+  }
+  async setTheme(theme: Theme): Promise<void> {
+    if (!['team', 'light', 'oled'].includes(theme)) throw new Error('Choose a supported theme.')
+    this.state.theme = theme
     await this.save()
   }
   async setTournament(manifest: TournamentManifest): Promise<void> {

@@ -9,7 +9,7 @@ const externalHosts = new Set(['osu.ppy.sh', 'osucollector.com', 'www.osucollect
 function openTrustedExternal(url) {
   try {
     const target = new URL(url)
-    if (target.protocol === 'https:' && externalHosts.has(target.hostname)) void shell.openExternal(target.toString())
+    if (target.protocol === 'https:' && (externalHosts.has(target.hostname) || (target.hostname === 'github.com' && /^\/jsposu\/pacc-bd\/releases\/tag\/v\d+\.\d+\.\d+$/.test(target.pathname)))) void shell.openExternal(target.toString())
   } catch { /* Ignore malformed links. */ }
 }
 

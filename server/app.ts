@@ -8,9 +8,10 @@ import { Queue } from './queue.js'
 import { migrateLegacyState } from './migration.js'
 import { resolveOsuInputs } from './osu.js'
 import { StableManager } from './stable.js'
+import { checkForUpdate } from './updates.js'
 
-export type ServerOptions = { port?: number; root: string; production?: boolean }
-export async function startServer({ port = 4387, root, production = false }: ServerOptions): Promise<{ server: Server; port: number; queue: Queue }> {
+export type ServerOptions = { port?: number; root: string; production?: boolean; updateRequest?: typeof fetch }
+export async function startServer({ port = 4387, root, production = false, updateRequest = fetch }: ServerOptions): Promise<{ server: Server; port: number; queue: Queue }> {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error('Invalid PORT.')
   const stateFile = path.join(process.env.PACC_BD_DATA_DIR || process.env.PANAMA_MAPS_DATA_DIR || process.env.AIMTHMUS_DATA_DIR || path.join(homedir(), '.pacc-bd'), 'state.json')
   if (!process.env.PACC_BD_DATA_DIR && !process.env.PANAMA_MAPS_DATA_DIR && !process.env.AIMTHMUS_DATA_DIR) {
@@ -19,6 +20,7 @@ export async function startServer({ port = 4387, root, production = false }: Ser
   }
   const queue = await Queue.open(stateFile)
   const stable = new StableManager(queue)
+  const currentVersion = await fs.readFile(path.join(root, 'package.json'), 'utf8').then(content => JSON.parse(content).version as string, () => null)
   const app = express()
   app.disable('x-powered-by')
   let actualPort = port
@@ -33,6 +35,10 @@ export async function startServer({ port = 4387, root, production = false }: Ser
     (req: express.Request, res: express.Response) => { void fn(req, res).catch((err: unknown) => { res.status(400).json({ error: err instanceof Error ? err.message : 'Request failed.' }) }) }
 
   app.get('/api/state', (_req, res) => res.json(queue.state))
+  app.get('/api/update', route(async (_req, res) => {
+    if (!currentVersion) throw new Error('Could not determine the installed app version.')
+    res.json(await checkForUpdate(currentVersion, updateRequest))
+  }))
   app.post('/api/collection', route(async (req, res) => {
     const id = parseCollectionId(req.body?.input)
     const collection = await fetchCollection(id)
@@ -51,9 +57,12 @@ export async function startServer({ port = 4387, root, production = false }: Ser
   }))
   app.post('/api/show', route(async (req, res) => { await queue.showCollection(Number(req.body?.id)); res.json({ ok: true }) }))
   app.post('/api/collections/clear', route(async (_req, res) => { await queue.clearCollections(); res.json({ ok: true }) }))
+  app.post('/api/queue/clear', route(async (_req, res) => { await queue.clearQueue(); res.json({ ok: true }) }))
+  app.post('/api/theme', route(async (req, res) => { await queue.setTheme(req.body?.theme); res.json({ ok: true }) }))
   app.get('/api/stable', route(async (_req, res) => { res.json(await stable.list()) }))
   app.get('/api/stable/collection', route(async (req, res) => { res.json(await stable.collection(String(req.query.name || ''))) }))
   app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''))) }))
+  app.get('/api/stable/preview', route(async (req, res) => { res.json(await stable.preview(req.query.source as 'collector' | 'tournament')) }))
   app.post('/api/stable/connect', route(async (req, res) => { res.json(await stable.connect(req.body?.directory)) }))
   app.post('/api/stable/refresh', route(async (_req, res) => { res.json(await stable.list(true)) }))
   app.post('/api/stable/edit', route(async (req, res) => { res.json(await stable.edit(req.body || {})) }))

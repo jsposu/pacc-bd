@@ -109,6 +109,8 @@ test('prefers full Collector cover for the map background and rejects untrusted 
 test('English and Spanish copy and backend diagnostics stay available', () => {
   assert.equal(copy.es.downloadAll, 'Descargar todo')
   assert.equal(copy.en.downloadAll, 'Download all')
+  assert.deepEqual([copy.en.themeTeam, copy.en.themeLight, copy.en.themeOled], ['Dark Theme', 'Light Theme', 'Oled Theme'])
+  assert.deepEqual([copy.es.themeTeam, copy.es.themeLight, copy.es.themeOled], ['Tema oscuro', 'Tema claro', 'Tema OLED'])
   assert.match(copy.en.credit, /osakari · Vibecoded/)
   assert.match(copy.es.credit, /osakari · Vibecoded/)
   assert.equal(localizeError('Mirror rate limited (HTTP 429). Waiting 10s before retry 2/3.', 'es'), 'El mirror alcanzó su límite (HTTP 429). Esperando 10 s antes del reintento 2/3.')
@@ -192,10 +194,13 @@ test('429 waits and retries same mirror, cancel aborts active response and clear
   await q2.settings({ directory: path.join(dir, 'other'), mirror: 'direct' })
   await q2.setCollection(coll)
   await q2.enqueue(44, [1])
+  await assert.rejects(q2.clearQueue(), /Cancel pending downloads/)
   await q2.cancel()
   assert.equal(q2.state.queue[0].status, 'cancelled')
   await new Promise(resolve => setTimeout(resolve, 100)) // Let the aborted worker finish its final state write.
   assert.equal((await fs.readdir(path.join(dir, 'other'))).filter(x => x.endsWith('.part')).length, 0)
+  await q2.clearQueue()
+  assert.deepEqual(q2.state.queue, [])
 })
 
 test('cancelling a partially streamed file removes only its temporary file', async t => {
