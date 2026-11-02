@@ -30,6 +30,8 @@ export type TournamentEntry = {
   checksum: string | null
   version: string | null
   stars: number | null
+  bpm?: number | null
+  setDifficulties?: { id: number; stars: number | null; bpm: number | null }[]
   artist: string
   title: string
   creator: string

@@ -40,6 +40,9 @@ test('collection.db round-trips names, unicode, hashes and rejects truncated or 
   assert.throws(() => parseCollectionDb(Buffer.alloc(8)), /Invalid/)
   assert.equal(installedMap(osu).checksum, hash)
   assert.equal(installedMap(osu).beatmapId, 12345)
+  const timed = Buffer.concat([osu, Buffer.from('\n[TimingPoints]\n0,-100,4,2,0,100,0,0\n0,500,4,2,0,100,1,0\n')])
+  assert.equal(installedMap(timed).bpm, 120)
+  assert.equal(installedMap(osu).bpm, null)
 })
 
 test('installed-map scan matches MD5 and writes backup while preserving other collections', async t => {
@@ -117,6 +120,8 @@ test('saved Collector and ID previews match only imported maps, expanding set-on
   assert.equal(collector.name, 'Collector set')
   assert.equal(collector.total, 4)
   assert.equal(collector.maps.find(map => map.beatmapId === 12345)?.installed?.checksum, hash)
+  assert.equal(collector.maps.find(map => map.beatmapId === 12345)?.stars, 2)
+  assert.equal(collector.maps.find(map => map.beatmapId === 54321)?.stars, null)
   assert.equal(collector.maps.find(map => map.beatmapId === 54321)?.installed?.beatmapId, 54321)
   assert.equal(collector.maps.find(map => map.beatmapId === 99999)?.installed, null)
   assert.equal(collector.maps.find(map => map.key === `missing:${'c'.repeat(32)}`)?.installed, null, 'do not match a differing checksum by ID')
@@ -126,6 +131,10 @@ test('saved Collector and ID previews match only imported maps, expanding set-on
   ] }
   const ids = await manager.preview('tournament')
   assert.equal(ids.maps.filter(map => map.installed).length, 2)
+  assert.equal((await manager.search('A Song', { starsMin: '2' })).length, 1)
+  assert.equal((await manager.search('A Song', { starsMin: '2', includeUnknown: 'true' })).length, 2)
+  assert.equal((await manager.search('A Song', { bpmMin: '150' })).length, 0)
+  await assert.rejects(manager.search('', { starsMin: '20', starsMax: '1' }), /valid star rating/)
   assert.equal(ids.maps.filter(map => !map.installed).length, 1)
   const edit = await manager.edit({ operation: 'add', name: 'Target', hashes: ids.maps.filter(map => map.installed).map(map => map.installed!.checksum), revision: (await manager.list()).revision, confirmedClosed: true })
   assert.equal(edit.collections.find(c => c.name === 'Target')?.count, 2)

@@ -61,7 +61,7 @@ export async function startServer({ port = 4387, root, production = false, updat
   app.post('/api/theme', route(async (req, res) => { await queue.setTheme(req.body?.theme); res.json({ ok: true }) }))
   app.get('/api/stable', route(async (_req, res) => { res.json(await stable.list()) }))
   app.get('/api/stable/collection', route(async (req, res) => { res.json(await stable.collection(String(req.query.name || ''))) }))
-  app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''))) }))
+  app.get('/api/stable/search', route(async (req, res) => { res.json(await stable.search(String(req.query.q || ''), { starsMin: req.query.starsMin, starsMax: req.query.starsMax, bpmMin: req.query.bpmMin, bpmMax: req.query.bpmMax, includeUnknown: req.query.includeUnknown })) }))
   app.get('/api/stable/preview', route(async (req, res) => { res.json(await stable.preview(req.query.source as 'collector' | 'tournament')) }))
   app.post('/api/stable/connect', route(async (req, res) => { res.json(await stable.connect(req.body?.directory)) }))
   app.post('/api/stable/refresh', route(async (_req, res) => { res.json(await stable.list(true)) }))

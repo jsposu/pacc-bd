@@ -53,7 +53,7 @@ test('deduplicates selected difficulties into sets', () => {
   assert.deepEqual([...selectedSets(coll, [1, 2, 3])], [[100, [1, 2]], [101, [3]]])
 })
 
-const osuSet = { id: 100, artist: 'Test artist', title: 'Test song', creator: 'Mapper', status: 'ranked', covers: { cover: 'https://assets.ppy.sh/beatmaps/100/covers/cover.jpg' }, beatmaps: [{ id: 11, version: 'Insane', checksum: 'a'.repeat(32), difficulty_rating: 5.2 }, { id: 12, version: 'Hard', checksum: 'b'.repeat(32), difficulty_rating: 3.7 }] }
+const osuSet = { id: 100, artist: 'Test artist', title: 'Test song', creator: 'Mapper', status: 'ranked', bpm: 180, covers: { cover: 'https://assets.ppy.sh/beatmaps/100/covers/cover.jpg' }, beatmaps: [{ id: 11, version: 'Insane', checksum: 'a'.repeat(32), difficulty_rating: 5.2 }, { id: 12, version: 'Hard', checksum: 'b'.repeat(32), difficulty_rating: 3.7 }] }
 const osuHTML = `<script id="json-beatmapset" type="application/json">${JSON.stringify(osuSet)}</script>`
 test('parses pasted osu! IDs and links; rejects untrusted URLs and ambiguous values', () => {
   assert.deepEqual(parseOsuInputs('11, https://osu.ppy.sh/beatmapsets/100#osu/12\nhttps://osu.ppy.sh/beatmapsets/100', 'beatmap').map(({ kind, id }) => [kind, id]), [['beatmap', 11], ['beatmap', 12], ['beatmapset', 100]])
@@ -69,6 +69,8 @@ test('resolves public osu! pages, caches sibling difficulties, reports failures 
   const result = await resolveOsuInputs('11 12 https://osu.ppy.sh/beatmapsets/100 999', 'beatmap', request, 0)
   assert.equal(calls, 2)
   assert.deepEqual(result.entries.map(entry => [entry.beatmapsetId, entry.difficultyId, entry.checksum]), [[100, 11, 'a'.repeat(32)], [100, 12, 'b'.repeat(32)], [100, null, null]])
+  assert.deepEqual(result.entries.map(entry => entry.bpm), [180, 180, 180])
+  assert.deepEqual(result.entries[2].setDifficulties?.map(diff => diff.stars), [5.2, 3.7])
   assert.equal(result.failures.length, 1)
   assert.match(result.failures[0].reason, /404/)
   const redirect = (async () => new Response(null, { status: 302, headers: { location: 'https://localhost/private' } })) as typeof fetch

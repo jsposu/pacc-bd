@@ -80,7 +80,8 @@ export class OsuRateLimit extends Error {
   constructor(public delay: number | null) { super('osu! rate limited metadata requests (HTTP 429).') }
 }
 
-type PageSet = { id: number; artist?: string; title?: string; creator?: string; status?: string; covers?: { cover?: string; card?: string }; beatmaps?: Array<{ id: number; checksum?: string; version?: string; difficulty_rating?: number; convert?: boolean }> }
+type PageSet = { id: number; artist?: string; title?: string; creator?: string; status?: string; bpm?: number; covers?: { cover?: string; card?: string }; beatmaps?: Array<{ id: number; checksum?: string; version?: string; difficulty_rating?: number; bpm?: number; convert?: boolean }> }
+function positiveStat(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null }
 export function parseOsuPage(html: string, requested: OsuInput): { set: PageSet; entry: TournamentEntry } {
   const match = /<script\b[^>]*\bid=["']json-beatmapset["'][^>]*>([\s\S]*?)<\/script>/i.exec(html)
   if (!match) throw new Error('osu! did not provide public beatmap metadata for this ID.')
@@ -94,7 +95,8 @@ export function parseOsuPage(html: string, requested: OsuInput): { set: PageSet;
   return { set, entry: {
     source: requested.source, kind: requested.kind, requestedId: requested.id, beatmapsetId: set.id,
     difficultyId: diff?.id ?? null, checksum: diff?.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null,
-    version: diff?.version ?? null, stars: typeof diff?.difficulty_rating === 'number' && Number.isFinite(diff.difficulty_rating) ? diff.difficulty_rating : null,
+    version: diff?.version ?? null, stars: positiveStat(diff?.difficulty_rating), bpm: positiveStat(diff?.bpm) ?? positiveStat(set.bpm),
+    setDifficulties: set.beatmaps.filter(map => Number.isSafeInteger(map.id)).map(map => ({ id: map.id, stars: positiveStat(map.difficulty_rating), bpm: positiveStat(map.bpm) ?? positiveStat(set.bpm) })),
     artist: set.artist || 'Unknown artist', title: set.title || 'Unknown title', creator: set.creator || 'Unknown mapper',
     status: set.status || 'unknown', cover,
   } }
@@ -126,7 +128,7 @@ export async function resolveOsuInputs(input: string, numberKind: IdKind, reques
         }
         resolved = parseOsuPage(html, item)
         bySet.set(resolved.set.id, { set: resolved.set, entry: { ...resolved.entry, kind: 'beatmapset', difficultyId: null, checksum: null, version: null, stars: null } })
-        for (const diff of resolved.set.beatmaps || []) byDifficulty.set(diff.id, { set: resolved.set, entry: { ...resolved.entry, difficultyId: diff.id, checksum: diff.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null, version: diff.version ?? null, stars: typeof diff.difficulty_rating === 'number' && Number.isFinite(diff.difficulty_rating) ? diff.difficulty_rating : null } })
+        for (const diff of resolved.set.beatmaps || []) byDifficulty.set(diff.id, { set: resolved.set, entry: { ...resolved.entry, difficultyId: diff.id, checksum: diff.checksum && /^[\da-f]{32}$/i.test(diff.checksum) ? diff.checksum : null, version: diff.version ?? null, stars: positiveStat(diff.difficulty_rating), bpm: positiveStat(diff.bpm) ?? positiveStat(resolved.set.bpm) } })
       }
       // Cache entries never change the original source, kind, and requested ID.
       entries.push({ ...resolved.entry, source: item.source, kind: item.kind, requestedId: item.id, difficultyId: item.kind === 'beatmap' ? item.id : null, checksum: item.kind === 'beatmap' ? resolved.entry.checksum : null, version: item.kind === 'beatmap' ? resolved.entry.version : null, stars: item.kind === 'beatmap' ? resolved.entry.stars : null })

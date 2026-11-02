@@ -11,7 +11,7 @@ const HASH = /^[a-f0-9]{32}$/i
 const MAX_DB = 64 * 1024 * 1024
 const MAX_MAPS = 100000
 type StableCollection = { name: string; hashes: string[] }
-export type InstalledMap = { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null }
+export type InstalledMap = { checksum: string; artist: string; title: string; creator: string; version: string; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null }
 type Database = { version: number; collections: StableCollection[] }
 
 export function parseCollectionDb(buffer: Buffer): Database {
@@ -91,14 +91,22 @@ export function installedMap(buffer: Buffer): InstalledMap {
   const content = buffer.subarray(0, 128 * 1024).toString('utf8')
   const fields: Record<string, string> = {}
   let inMetadata = false
+  let inTiming = false
+  let bpm: number | null = null
   for (const line of content.split(/\r?\n/)) {
-    if (line.trim() === '[Metadata]') { inMetadata = true; continue }
-    if (inMetadata && /^\[.*\]/.test(line.trim())) break
+    if (line.trim() === '[Metadata]') { inMetadata = true; inTiming = false; continue }
+    if (line.trim() === '[TimingPoints]') { inMetadata = false; inTiming = true; continue }
+    if (/^\[.*\]/.test(line.trim())) { inMetadata = false; inTiming = false; continue }
+    if (inTiming && bpm === null) {
+      const parts = line.split(',')
+      const beatLength = Number(parts[1])
+      if (parts.length >= 7 && Number(parts[6]) === 1 && Number.isFinite(beatLength) && beatLength > 0) bpm = Math.round(60000 / beatLength * 10) / 10
+    }
     if (!inMetadata) continue
     const at = line.indexOf(':')
     if (at > 0) fields[line.slice(0, at).trim()] = line.slice(at + 1).trim()
   }
-  return { checksum: md5(buffer), artist: fields.Artist || 'Unknown artist', title: fields.Title || 'Unknown title', creator: fields.Creator || 'Unknown mapper', version: fields.Version || 'Unknown difficulty', beatmapId: positive(fields.BeatmapID), beatmapsetId: positive(fields.BeatmapSetID) }
+  return { checksum: md5(buffer), artist: fields.Artist || 'Unknown artist', title: fields.Title || 'Unknown title', creator: fields.Creator || 'Unknown mapper', version: fields.Version || 'Unknown difficulty', beatmapId: positive(fields.BeatmapID), beatmapsetId: positive(fields.BeatmapSetID), stars: null, bpm }
 }
 
 async function osuRunning(): Promise<boolean> {
@@ -114,6 +122,25 @@ export class StableManager {
   private scanning: Promise<void> | null = null
   private writing: Promise<unknown> = Promise.resolve()
   constructor(private queue: Queue, private isRunning: () => Promise<boolean> = osuRunning) {}
+
+  private metadata(): Map<number, { stars: number | null; bpm: number | null }> {
+    const metadata = new Map<number, { stars: number | null; bpm: number | null }>()
+    const add = (id: number, stars: number | null, bpm: number | null) => {
+      const old = metadata.get(id)
+      metadata.set(id, { stars: old?.stars ?? stars, bpm: old?.bpm ?? bpm })
+    }
+    for (const collection of this.queue.state.collections) for (const map of collection.maps) add(map.id, map.stars, map.bpm)
+    for (const entry of this.queue.state.tournament?.entries || []) {
+      if (entry.difficultyId) add(entry.difficultyId, entry.stars, entry.bpm ?? null)
+      for (const diff of entry.setDifficulties || []) add(diff.id, diff.stars, diff.bpm)
+    }
+    return metadata
+  }
+
+  private withStats(map: InstalledMap, metadata: Map<number, { stars: number | null; bpm: number | null }>): InstalledMap {
+    const match = map.beatmapId ? metadata.get(map.beatmapId) : null
+    return { ...map, stars: match?.stars ?? null, bpm: map.bpm ?? match?.bpm ?? null }
+  }
 
   private async folder(input = this.queue.state.stableDirectory): Promise<string> {
     if (typeof input !== 'string' || !path.isAbsolute(input) || input.includes('\0')) throw new Error('Choose your osu!stable installation folder first.')
@@ -186,16 +213,34 @@ export class StableManager {
     const { db, revision } = await this.readDb(directory)
     const collection = db.collections.find(c => c.name === name)
     if (!collection) throw new Error('Collection no longer exists. Refresh and try again.')
-    return { revision, name, maps: collection.hashes.map(hash => ({ checksum: hash, installed: this.installed.get(hash.toLowerCase()) || null })) }
+    const metadata = this.metadata()
+    return { revision, name, maps: collection.hashes.map(hash => ({ checksum: hash, installed: this.installed.has(hash.toLowerCase()) ? this.withStats(this.installed.get(hash.toLowerCase())!, metadata) : null })) }
   }
 
-  async search(query: string) {
+  async search(query: string, options: { starsMin?: unknown; starsMax?: unknown; bpmMin?: unknown; bpmMax?: unknown; includeUnknown?: unknown } = {}) {
     const directory = await this.folder()
     await this.scan(directory)
     const term = String(query || '').slice(0, 120).toLocaleLowerCase()
     const results: InstalledMap[] = []
+    const metadata = this.metadata()
+    const number = (value: unknown, max: number) => {
+      if (value === undefined) return null
+      if (typeof value !== 'string' || !value.trim() || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > max) throw new Error('Choose a valid star rating or BPM range.')
+      return Number(value)
+    }
+    const starsMin = number(options.starsMin, 30), starsMax = number(options.starsMax, 30)
+    const bpmMin = number(options.bpmMin, 2000), bpmMax = number(options.bpmMax, 2000)
+    if ((starsMin !== null && starsMax !== null && starsMin > starsMax) || (bpmMin !== null && bpmMax !== null && bpmMin > bpmMax)) throw new Error('Choose a valid star rating or BPM range.')
+    const inRange = (value: number | null, min: number | null, max: number | null) => {
+      if (min === null && max === null) return true
+      if (value === null) return options.includeUnknown === 'true'
+      return (min === null || value >= min) && (max === null || value <= max)
+    }
     for (const map of this.installed.values()) {
-      if (`${map.artist} ${map.title} ${map.version} ${map.creator} ${map.beatmapId || ''} ${map.beatmapsetId || ''}`.toLocaleLowerCase().includes(term)) results.push(map)
+      if (`${map.artist} ${map.title} ${map.version} ${map.creator} ${map.beatmapId || ''} ${map.beatmapsetId || ''}`.toLocaleLowerCase().includes(term)) {
+        const enriched = this.withStats(map, metadata)
+        if (inRange(enriched.stars, starsMin, starsMax) && inRange(enriched.bpm, bpmMin, bpmMax)) results.push(enriched)
+      }
       if (results.length >= 80) break
     }
     return results
@@ -212,18 +257,23 @@ export class StableManager {
       if (map.beatmapsetId) bySet.set(map.beatmapsetId, [...(bySet.get(map.beatmapsetId) || []), map])
     }
     const current = this.queue.state.collections.find(c => c.id === this.queue.state.currentId)
+    const metadata = this.metadata()
     const entries = source === 'collector'
-      ? (current?.maps || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.id, beatmapsetId: map.beatmapsetId }))
-      : (this.queue.state.tournament?.entries || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.difficultyId, beatmapsetId: map.beatmapsetId }))
+      ? (current?.maps || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.id, beatmapsetId: map.beatmapsetId, stars: map.stars, bpm: map.bpm, setDifficulties: undefined as { id: number; stars: number | null; bpm: number | null }[] | undefined }))
+      : (this.queue.state.tournament?.entries || []).map(map => ({ artist: map.artist, title: map.title, version: map.version, checksum: map.checksum, beatmapId: map.difficultyId, beatmapsetId: map.beatmapsetId, stars: map.stars, bpm: map.bpm, setDifficulties: map.setDifficulties }))
     const seen = new Set<string>()
-    const maps: { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; installed: InstalledMap | null }[] = []
+    const maps: { key: string; artist: string; title: string; version: string | null; beatmapId: number | null; beatmapsetId: number | null; stars: number | null; bpm: number | null; installed: InstalledMap | null }[] = []
     let total = 0
     const append = (entry: typeof entries[number], installed: InstalledMap | null) => {
       const key = installed ? `hash:${installed.checksum}` : entry.checksum ? `missing:${entry.checksum.toLowerCase()}` : `missing:${entry.beatmapId || 0}:${entry.beatmapsetId || 0}`
       if (seen.has(key)) return
       seen.add(key)
       total++
-      if (maps.length < 5000) maps.push({ key, artist: installed?.artist || entry.artist, title: installed?.title || entry.title, version: installed?.version || entry.version, beatmapId: installed?.beatmapId || entry.beatmapId, beatmapsetId: installed?.beatmapsetId || entry.beatmapsetId, installed })
+      if (maps.length < 5000) {
+        const resolved = installed ? this.withStats(installed, metadata) : null
+        const sibling = entry.setDifficulties?.find(diff => diff.id === resolved?.beatmapId)
+        maps.push({ key, artist: resolved?.artist || entry.artist, title: resolved?.title || entry.title, version: resolved?.version || entry.version, beatmapId: resolved?.beatmapId || entry.beatmapId, beatmapsetId: resolved?.beatmapsetId || entry.beatmapsetId, stars: resolved?.stars ?? sibling?.stars ?? entry.stars ?? null, bpm: resolved?.bpm ?? sibling?.bpm ?? entry.bpm ?? null, installed: resolved })
+      }
     }
     for (const entry of entries) {
       if (entry.checksum) append(entry, HASH.test(entry.checksum) ? this.installed.get(entry.checksum.toLowerCase()) || null : null)
