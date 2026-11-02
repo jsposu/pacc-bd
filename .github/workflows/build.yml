@@ -38,7 +38,9 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Check packaged Linux app
         if: runner.os == 'Linux'
-        run: xvfb-run -a release/linux-unpacked/pacc-bd --no-sandbox --smoke-test
+        run: |
+          if ! command -v xvfb-run >/dev/null; then sudo apt-get update && sudo apt-get install -y xvfb; fi
+          xvfb-run -a release/linux-unpacked/pacc-bd --no-sandbox --smoke-test
         env:
           PACC_BD_DATA_DIR: ${{ runner.temp }}/pacc-smoke
       - name: Check packaged Windows app
@@ -46,8 +48,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PACC_BD_DATA_DIR = Join-Path $env:RUNNER_TEMP 'pacc-smoke'
-          & 'release/win-unpacked/PACC-BD.exe' --smoke-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $process = Start-Process -FilePath 'release/win-unpacked/PACC-BD.exe' -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
