@@ -1,0 +1,35 @@
+appId: io.github.jsposu.paccbd
+productName: PACC-BD
+copyright: Copyright © 2026 osakari
+directories:
+  output: release
+files:
+  - dist/**/*
+  - build/server/**/*
+  - build/icons/**/*
+  - electron/**/*
+  - package.json
+  - '!**/*.map'
+asar: true
+linux:
+  syncDesktopName: true
+  target:
+    - AppImage
+    - deb
+  category: Game
+  icon: build/icons
+  artifactName: PACC-BD-${version}-linux-${arch}.${ext}
+deb:
+  synopsis: Local osu! Collector and tournament beatmap downloader
+  description: Preview public collections and tournament IDs, then download selected beatmapsets.
+win:
+  target:
+    - nsis
+  icon: build/icons/icon.ico
+  artifactName: PACC-BD-${version}-windows-${arch}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
