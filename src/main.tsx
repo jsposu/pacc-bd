@@ -4,7 +4,7 @@ import { ArrowDownToLine, ArrowRight, Check, ChevronDown, CircleHelp, Clock3, Ex
 import { copy, localizeError, type Language, type TranslationKey } from './i18n'
 import { StablePanel } from './StablePanel'
 import { UpdateChecker } from './UpdateChecker'
-import { MapFiltersPanel } from './MapFilters'
+import { MapFiltersPanel } from './MapFiltersPanel'
 import { emptyFilters, matchesMapFilters, type MapFilters } from './mapFilters'
 import './styles.css'
 

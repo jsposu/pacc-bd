@@ -1,7 +1,7 @@
 {
   "name": "pacc-bd",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.3.1",
   "license": "MIT",
   "description": "Local osu! Collector and tournament beatmap downloader for Panama Accuracy",
   "homepage": "https://github.com/jsposu/pacc-bd",

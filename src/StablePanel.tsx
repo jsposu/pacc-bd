@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { Check, FolderOpen, GripVertical, Library, LoaderCircle, Plus, RefreshCcw, Search, Trash2 } from 'lucide-react'
 import { copy, localizeError, type Language, type TranslationKey } from './i18n'
-import { MapFiltersPanel } from './MapFilters'
+import { MapFiltersPanel } from './MapFiltersPanel'
 import { emptyFilters, matchesMapFilters, type MapFilters } from './mapFilters'
 
 type Source = 'collector' | 'tournament'
