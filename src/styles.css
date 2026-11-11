@@ -597,7 +597,7 @@ footer{border-color:var(--line)}
 /* Compact previews and lazer-inspired sheared sliders. */
 .compact-intro{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 2px 12px;color:var(--soft);font-size:12px}
 .compact-intro>a{display:inline-flex;align-items:center;gap:7px;color:var(--soft);text-decoration:none;font-size:11px;white-space:nowrap}
-.compact-intro img{width:24px;height:18px;object-fit:cover;border-radius:3px}
+.compact-intro img{width:24px;height:24px;object-fit:contain}
 .compact-intro>a:hover{color:var(--osu-accent)}
 .collection-panel>.stats{padding:10px 24px;margin-top:12px;gap:24px}.collection-panel>.stats span{flex-direction:row;align-items:baseline;gap:5px}.collection-panel>.stats b{font-size:17px}
 .download-toolbar{border-bottom:1px solid var(--line);border-top:0!important;flex-wrap:wrap;padding:12px 24px!important;gap:10px;background:var(--osu-wash)}
