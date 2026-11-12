@@ -11,12 +11,12 @@
 
 Preview osu! Collector collections or beatmap IDs, filter difficulties, and download `.osz` files in one place.
 
-- **Windows:** run the `.exe` installer.
+- **Windows:** put the `*-portable.exe` in a writable folder and run it. No installation; settings stay in `PACC-BD-data` beside it.
 - **Linux:** make the `.AppImage` executable and run it; `libfuse2` may be required.
 - **Collections:** manage osu!stable collections with backups, or export for manual import into lazer.
 - **Appearance:** Dark / Light themes, English / Spanish, and desktop zoom.
 
-**Downloads:** [Latest release](https://github.com/jsposu/pacc-bd/releases/latest) · x64 · checksums included. The Windows installer is unsigned.
+**Downloads:** [Latest release](https://github.com/jsposu/pacc-bd/releases/latest) · x64 · checksums included. The Windows portable app is unsigned and can still trigger SmartScreen. Older releases include the former installer.
 
 Import beatmaps manually. Close osu!stable before editing collections; lazer support is export-only. The screenshot shows an example preview.
 

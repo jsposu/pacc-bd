@@ -13,9 +13,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            artifact: linux-installers
+            artifact: linux-portable
           - os: windows-2022
-            artifact: windows-installer
+            artifact: windows-portable
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -43,19 +43,26 @@ jobs:
           xvfb-run -a release/linux-unpacked/pacc-bd --no-sandbox --smoke-test
         env:
           PACC_BD_DATA_DIR: ${{ runner.temp }}/pacc-smoke
-      - name: Check packaged Windows app
+      - name: Check Windows portable launcher and data location
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $env:PACC_BD_DATA_DIR = Join-Path $env:RUNNER_TEMP 'pacc-smoke'
-          $process = Start-Process -FilePath 'release/win-unpacked/PACC-BD.exe' -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
+          $portable = @(Get-ChildItem 'release/*-portable.exe')
+          if ($portable.Count -ne 1) { throw 'Expected exactly one Windows portable executable.' }
+          $folder = Join-Path $env:RUNNER_TEMP 'PACC portable smoke'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $exe = Join-Path $folder $portable[0].Name
+          Copy-Item $portable[0].FullName $exe
+          Remove-Item Env:PACC_BD_DATA_DIR, Env:PANAMA_MAPS_DATA_DIR, Env:AIMTHMUS_DATA_DIR -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
           if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+          if (!(Test-Path (Join-Path $folder 'PACC-BD-data/electron/logs'))) { throw 'Portable data was not created beside the executable.' }
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             release/*.AppImage
-            release/*-setup.exe
+            release/*-portable.exe
           if-no-files-found: error
 
   publish:
@@ -67,15 +74,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-installer*'
+          pattern: '*-portable'
           path: artifacts
           merge-multiple: true
-      - name: Publish tested installers and checksums
+      - name: Publish tested portable apps and checksums
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           cd artifacts
-          sha256sum *.AppImage *-setup.exe > SHA256SUMS
-          gh release create "$TAG" *.AppImage *-setup.exe SHA256SUMS --title "PACC-BD $TAG" --generate-notes
+          sha256sum *.AppImage *-portable.exe > SHA256SUMS
+          gh release create "$TAG" *.AppImage *-portable.exe SHA256SUMS --title "PACC-BD $TAG" --generate-notes

@@ -1,6 +1,10 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, session, Menu } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
+const { configurePortable } = require('./portable.cjs')
+
+let portableError = null
+try { configurePortable(app) } catch (error) { portableError = error }
 
 let window = null
 let server = null
@@ -55,7 +59,10 @@ async function main() {
   await window.loadURL(localOrigin)
 }
 
-if (!app.requestSingleInstanceLock()) app.quit()
+if (portableError) {
+  dialog.showErrorBox('PACC-BD portable could not start', portableError.message)
+  app.exit(1)
+} else if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus() } })
   app.on('before-quit', () => server?.close())

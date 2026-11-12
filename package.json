@@ -17,7 +17,7 @@
     "build:all": "npm run build && npm run build:server",
     "desktop": "npm run build:all && electron .",
     "dist:linux": "electron-builder --linux AppImage --publish never",
-    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:win": "electron-builder --win portable --publish never",
     "test": "tsx --test tests/*.test.ts tests/*.test.tsx"
   },
   "dependencies": {
