@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowDownToLine, ArrowRight, Check, ChevronDown, CircleHelp, Clock3, ExternalLink, FolderOpen, Library, LoaderCircle, Pause, Play, RefreshCcw, Search, Settings2, Square, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowRight, Check, ChevronDown, CircleHelp, ExternalLink, FolderOpen, Grid2X2, List, LoaderCircle, Search, Settings2, X } from 'lucide-react'
 import { copy, localizeError, type Language, type TranslationKey } from './i18n'
 import { StablePanel } from './StablePanel'
 import { UpdateChecker } from './UpdateChecker'
 import { MapFiltersPanel } from './MapFiltersPanel'
-import { StarRating } from './StarRating'
+import { BeatmapCard } from './BeatmapCard'
+import { DownloadQueue } from './DownloadQueue'
+import { HeaderBackdrop } from './HeaderBackdrop'
+import { sortMapGroups, type SortOrder } from './listing'
 import { ZoomSettings } from './ZoomSettings'
 import { emptyFilters, matchesMapFilters, type MapFilters } from './mapFilters'
 import type { Collection, Difficulty, TournamentEntry, TournamentManifest } from '../server/types'
 import './styles.css'
+import './listing.css'
 
 declare global { interface Window { paccDesktop?: { chooseDirectory(): Promise<string | null>; getZoom(): Promise<number>; setZoom(value: number): Promise<number> } } }
 
@@ -23,7 +27,6 @@ async function api<T = unknown>(url: string, body?: object): Promise<T> {
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
   return data as T
 }
-function formatBytes(n: number) { return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB` }
 function group(maps: Difficulty[]) {
   const result = new Map<string, Difficulty[]>()
   for (const map of maps) {
@@ -31,12 +34,6 @@ function group(maps: Difficulty[]) {
     result.set(key, [...(result.get(key) || []), map])
   }
   return [...result.values()]
-}
-
-function MapBackground({ src }: { src: string | null }) {
-  const [broken, setBroken] = useState(false)
-  useEffect(() => setBroken(false), [src])
-  return <><div className="map-background" aria-hidden="true">{src && !broken && <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} />}</div><div className="map-cover" aria-hidden="true">{src && !broken && <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} />}</div></>
 }
 
 function App() {
@@ -76,7 +73,8 @@ function App() {
   const [mirror, setMirror] = useState<'direct' | 'catboy'>('direct')
   const [theme, setTheme] = useState<Theme>(() => { try { return localStorage.getItem('pacc-bd-theme') === 'light' ? 'light' : 'oled' } catch { return 'oled' } })
   const [themeBusy, setThemeBusy] = useState(false)
-  const [queueOpen, setQueueOpen] = useState(true)
+  const [sort, setSort] = useState<SortOrder>('original')
+  const [view, setView] = useState<'grid' | 'list'>('grid')
 
   const refresh = async () => { const next = await api<State>('state'); setState(next); return next }
   useEffect(() => {
@@ -91,19 +89,18 @@ function App() {
   const collection: Collection = live || { id: 0, name: t('collectorReady'), uploader: '', reportedCount: 0, maps: [], fetchedAt: '' }
   const isDemo = !live
   const groups = useMemo(() => group(collection.maps), [collection.maps])
-  const visible = useMemo(() => groups.filter(maps => `${maps[0].artist} ${maps[0].title} ${maps[0].creator} ${maps.map(m => m.version).join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(maps => maps.filter(map => matchesMapFilters(map, collectorFilters))).filter(maps => maps.length), [groups, query, collectorFilters])
+  const visible = useMemo(() => sortMapGroups(groups.filter(maps => `${maps[0].artist} ${maps[0].title} ${maps[0].creator} ${maps.map(m => m.version).join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(maps => maps.filter(map => matchesMapFilters(map, collectorFilters))).filter(maps => maps.length), sort), [groups, query, collectorFilters, sort])
   const available = collection.maps.filter(m => m.beatmapsetId)
   const selectedSets = new Set(collection.maps.filter(m => selected.has(m.id) && m.beatmapsetId).map(m => m.beatmapsetId)).size
-  const done = state?.queue.filter(i => i.status === 'done').length || 0
-  const failed = state?.queue.filter(i => i.status === 'failed').length || 0
-  const outstanding = state?.queue.filter(i => i.status === 'pending' || i.status === 'downloading').length || 0
   const already = (setId: number | null) => state?.queue.find(i => i.beatmapsetId === setId)
   const tournamentSets = useMemo(() => {
     const sets = new Map<number, TournamentEntry[]>()
     for (const entry of state?.tournament?.entries || []) sets.set(entry.beatmapsetId, [...(sets.get(entry.beatmapsetId) || []), entry])
     return [...sets]
   }, [state?.tournament])
-  const visibleTournamentSets = useMemo(() => tournamentSets.map(([id, entries]) => [id, entries.filter(entry => matchesMapFilters(entry, tournamentFilters))] as const).filter(([, entries]) => entries.length), [tournamentSets, tournamentFilters])
+  const visibleTournamentSets = useMemo(() => sortMapGroups(tournamentSets.map(([, entries]) => entries.filter(entry => matchesMapFilters(entry, tournamentFilters) && `${entry.artist} ${entry.title} ${entry.creator} ${entry.version || ''} ${entry.beatmapsetId}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))).filter(entries => entries.length), sort).map(entries => [entries[0].beatmapsetId, entries] as const), [tournamentSets, tournamentFilters, query, sort])
+  const coverSource = activeSection === 'collector' || activeSection === 'tournament' ? activeSection : returnSection
+  const headerCover = coverSource === 'collector' ? visible[0]?.[0]?.cover ?? null : visibleTournamentSets[0]?.[1][0]?.cover ?? null
   function openCollections(source: 'collector' | 'tournament') { setReturnSection(source); setActiveSection('stable') }
   function openSettings() { if (activeSection === 'collector' || activeSection === 'tournament') setReturnSection(activeSection); setActiveSection('settings') }
   async function changeTheme(next: Theme) {
@@ -152,25 +149,26 @@ function App() {
       return next
     })
   }
-  function mapStatus(item: Item | undefined, map: Difficulty) {
-    if (item) return item.status === 'done' ? t('downloadedHere') : t(item.status)
-    if (!map.beatmapsetId) return t('noSetId')
-    if (language === 'es') return ({ ranked: 'CLASIFICADO', loved: 'POPULAR', pending: 'PENDIENTE', qualified: 'CALIFICADO', approved: 'APROBADO', graveyard: 'ARCHIVADO', sample: 'EJEMPLO' } as Record<string, string>)[map.status] || map.status.toUpperCase()
-    return map.status.toUpperCase()
-  }
   function downloadActions(source: 'collector' | 'tournament') {
     const isCollector = source === 'collector'
     const count = isCollector ? selectedSets : selectedTournament.size
     const ids = isCollector ? [...selected] : [...selectedTournament]
     const all = isCollector ? available.map(map => map.id) : tournamentSets.map(([id]) => id)
     const enqueue = (values: number[]) => void action(isCollector ? 'enqueue' : 'tournament/enqueue', isCollector ? { collectionId: collection.id, ids: values } : { ids: values })
-    return <div className="collection-actions download-toolbar"><div className="download-toolbar-summary"><strong>{count} {t('chosenSets')}</strong><small>{t('filterAllNote')}</small></div><div><button type="button" className="secondary-button" onClick={() => openCollections(source)}><Library size={15} />{t('collectionsNav')}</button><button type="button" className="secondary-button" disabled={!all.length} onClick={() => enqueue(all)}>{t('downloadAll')}</button><button type="button" className="primary-button" disabled={!ids.length} onClick={() => enqueue(ids)}><ArrowDownToLine size={16} />{t('downloadSelected')}</button></div></div>
+    return <div className="listing-download-actions"><span>{count} {t('selected')}</span><button type="button" className="listing-download-all" title={t('filterAllNote')} disabled={!all.length} onClick={() => enqueue(all)}>{t('downloadAll')}</button><button type="button" className="primary-button" disabled={!ids.length} onClick={() => enqueue(ids)}><ArrowDownToLine size={15} />{t('downloadSelected')}</button></div>
+  }
+  function searchBox() {
+    return <div className="listing-search"><Search size={25} /><input aria-label={t('searchLabel')} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('search')} /><details className="listing-help"><summary aria-label={language === 'es' ? 'Ayuda' : 'Help'}><CircleHelp size={21} /></summary><div>{t('oszNote')}<br />{t('filterAllNote')}. {t('installedNote')}</div></details></div>
+  }
+  function sortToolbar(results: string) {
+    return <div className="listing-toolbar"><label>{language === 'es' ? 'Ordenar por' : 'Sort by'}<select aria-label={language === 'es' ? 'Ordenar mapas' : 'Sort maps'} value={sort} onChange={event => setSort(event.target.value as SortOrder)}><option value="original">{language === 'es' ? 'Vista previa' : 'Preview order'}</option><option value="title">{language === 'es' ? 'Título' : 'Title'}</option><option value="artist">{language === 'es' ? 'Artista' : 'Artist'}</option><option value="difficulty">{language === 'es' ? 'Dificultad' : 'Difficulty'}</option></select></label><span className="listing-results">{results}</span><div className="listing-view" role="group" aria-label={language === 'es' ? 'Vista' : 'View'}><button type="button" aria-label={language === 'es' ? 'Cuadrícula' : 'Grid'} aria-pressed={view === 'grid'} onClick={() => setView('grid')}><Grid2X2 size={17} /></button><button type="button" aria-label={language === 'es' ? 'Lista' : 'List'} aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={18} /></button></div></div>
   }
 
   return <div className="app-shell">
+    <HeaderBackdrop cover={headerCover} />
     <header className="site-header"><div className="header-inner">
-      <div className="brand"><div className="app-name">PACC<span>-BD</span><small>{t('tagline')}</small></div><nav className="section-switch" aria-label={t('mode')}><button type="button" className={activeSection === 'collector' ? 'current' : ''} aria-current={activeSection === 'collector' ? 'page' : undefined} onClick={() => { setActiveSection('collector'); setError(''); setNotice('') }}><span className="tab-full">{t('collectorTab')}</span><span className="tab-short">{t('collectorTabShort')}</span></button><button type="button" className={activeSection === 'tournament' ? 'current' : ''} aria-current={activeSection === 'tournament' ? 'page' : undefined} onClick={() => { setActiveSection('tournament'); setError(''); setNotice('') }}><span className="tab-full">{t('beatmapTab')}</span><span className="tab-short">{t('beatmapTabShort')}</span></button></nav></div>
-      <div className="header-actions"><span className="local-indicator"><i />{t('local')}</span><UpdateChecker language={language} /><button type="button" className={`collections-nav ${activeSection === 'stable' ? 'current' : ''}`} aria-current={activeSection === 'stable' ? 'page' : undefined} onClick={() => activeSection === 'stable' ? setActiveSection(returnSection) : openCollections(activeSection === 'settings' ? returnSection : activeSection)}><Library size={15} />{t('collectionsNav')}</button><button type="button" className={`collections-nav settings-nav ${activeSection === 'settings' ? 'current' : ''}`} aria-current={activeSection === 'settings' ? 'page' : undefined} onClick={() => activeSection === 'settings' ? setActiveSection(returnSection) : openSettings()}><Settings2 size={15} />{t('settings')}</button><div className="language-switch" role="group" aria-label={t('language')}><button type="button" aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => changeLanguage('en')}>EN</button><button type="button" aria-pressed={language === 'es'} className={language === 'es' ? 'current' : ''} onClick={() => changeLanguage('es')}>ES</button></div></div>
+      <div className="brand"><div className="app-name">PACC<span>-BD</span><small>{t('tagline')}</small></div><nav className="section-switch" aria-label={t('mode')}><button type="button" className={activeSection === 'collector' ? 'current' : ''} aria-current={activeSection === 'collector' ? 'page' : undefined} onClick={() => { setActiveSection('collector'); setError(''); setNotice('') }}><span className="tab-full">{t('collectorTab')}</span><span className="tab-short">{t('collectorTabShort')}</span></button><button type="button" className={activeSection === 'tournament' ? 'current' : ''} aria-current={activeSection === 'tournament' ? 'page' : undefined} onClick={() => { setActiveSection('tournament'); setError(''); setNotice('') }}><span className="tab-full">{t('beatmapTab')}</span><span className="tab-short">{t('beatmapTabShort')}</span></button><button type="button" className={activeSection === 'stable' ? 'current' : ''} aria-current={activeSection === 'stable' ? 'page' : undefined} onClick={() => { if (activeSection !== 'stable') openCollections(activeSection === 'collector' || activeSection === 'tournament' ? activeSection : returnSection); setError(''); setNotice('') }}>{t('collectionsNav')}</button></nav></div>
+      <div className="header-actions"><UpdateChecker language={language} /><button type="button" className={`collections-nav settings-nav ${activeSection === 'settings' ? 'current' : ''}`} aria-current={activeSection === 'settings' ? 'page' : undefined} title={t('settings')} onClick={() => activeSection === 'settings' ? setActiveSection(returnSection) : openSettings()}><Settings2 size={15} />{t('settings')}</button><div className="language-switch" role="group" aria-label={t('language')}><button type="button" aria-pressed={language === 'en'} className={language === 'en' ? 'current' : ''} onClick={() => changeLanguage('en')}>EN</button><button type="button" aria-pressed={language === 'es'} className={language === 'es' ? 'current' : ''} onClick={() => changeLanguage('es')}>ES</button></div></div>
     </div></header>
 
     <main className="page">
@@ -181,59 +179,49 @@ function App() {
         <ZoomSettings language={language} />
         <div className="settings-card"><h2>{t('directory')}</h2><p>{t('settingsDescription')}</p><form className="settings-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void action('settings', { directory, mirror }) }}><label htmlFor="directory">{t('directoryAbsolute')}</label><input id="directory" required value={directory} onChange={e => setDirectory(e.target.value)} />{window.paccDesktop && <button className="secondary-button" type="button" onClick={() => { void window.paccDesktop?.chooseDirectory().then(value => { if (value) setDirectory(value) }).catch(e => setError((e as Error).message)) }}>{t('browse')}</button>}<label htmlFor="mirror">{t('mirror')}</label><select id="mirror" value={mirror} onChange={e => setMirror(e.target.value as 'direct' | 'catboy')}><option value="direct">{t('direct')}</option><option value="catboy">{t('catboy')}</option></select><button className="primary-button" type="submit">{t('saveSettings')}</button></form></div>
         <p className="installed-note">{t('installedNote')}</p>
-      </section> : activeSection === 'stable' ? <StablePanel language={language} initialSource={returnSection} goToSource={setActiveSection} /> : <><div className="compact-intro"><span>{t('heroOne')} {t('heroTwo')}</span><a href="https://osu.ppy.sh/teams/15959" target="_blank" rel="noopener noreferrer"><img src="/panama-accuracy-flag.png" alt="" />Panama Accuracy <ExternalLink size={12} /></a></div>
+      </section> : activeSection === 'stable' ? <StablePanel language={language} initialSource={returnSection} goToSource={setActiveSection} /> : <>
+      <DownloadQueue queue={state?.queue || []} paused={!!state?.paused} language={language} onAction={action} />
+      <div className="listing-heading"><h1><img src="/panama-accuracy-flag.png" alt="" />{language === 'es' ? 'listado de mapas' : 'beatmap listing'}</h1></div>
 
-      {activeSection === 'collector' ? <section className="import-section" aria-label={t('collectorSection')}>
-        <h2 className="import-heading">{t('collectorSection')}</h2>
+      {activeSection === 'collector' ? <details className="import-section listing-source" key={`collector-${collection.fetchedAt}`} open={isDemo}>
+        <summary>{t('collectionInput')}<ChevronDown size={14} /></summary>
         <form className="import-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void loadCollection(input) }}><label htmlFor="collection-input">{t('collectionInput')}</label><div className="input-line"><input id="collection-input" type="text" required autoComplete="off" placeholder={t('inputPlaceholder')} value={input} onChange={e => setInput(e.target.value)} /><button className="primary-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle size={16} className="spin" />{t('fetching')}</> : <>{t('fetch')} <ArrowRight size={16} /></>}</button></div></form>
-      </section> :
+      </details> :
 
-      <section className="tournament-input-panel" aria-label={t('tournamentSection')}>
-        <h2 className="import-heading">{t('tournamentSection')}</h2><p>{t('tournamentHint')}</p>
+      <details className="tournament-input-panel listing-source" key={`tournament-${state?.tournament?.fetchedAt}`} open={!tournamentSets.length}>
+        <summary>{t('tournamentInput')}<ChevronDown size={14} /></summary><p>{t('tournamentHint')}</p>
         <form onSubmit={(event: FormEvent) => { event.preventDefault(); void loadTournament() }}>
           <label htmlFor="tournament-input">{t('tournamentInput')}</label>
           <textarea id="tournament-input" required maxLength={30000} value={tournamentInput} onChange={e => setTournamentInput(e.target.value)} placeholder={t('tournamentPlaceholder')} rows={4} />
           <div className="tournament-input-actions"><label htmlFor="number-kind">{t('numericIds')}</label><select id="number-kind" value={numberKind} onChange={e => setNumberKind(e.target.value as 'beatmap' | 'beatmapset')}><option value="beatmap">{t('beatmapId')}</option><option value="beatmapset">{t('beatmapsetId')}</option></select><button type="submit" className="primary-button" disabled={tournamentBusy}>{tournamentBusy ? <><LoaderCircle size={16} className="spin" />{t('resolving')}</> : <>{t('previewIds')} <ArrowRight size={16} /></>}</button></div>
         </form>
-      </section>}
+      </details>}
 
       {error && <div className="alert error" role="alert"><CircleHelp size={16} />{localizeError(error, language)}<button type="button" aria-label={t('dismissError')} onClick={() => setError('')}><X size={16} /></button></div>}
       {notice && <div className="alert success" role="status"><Check size={16} />{notice}<button type="button" aria-label={t('dismissNotice')} onClick={() => setNotice('')}><X size={16} /></button></div>}
 
-      <div className="workspace">
+      <div className="workspace listing-workspace">
         <div className="preview-panels">{activeSection === 'collector' ? <><section className="collection-panel" aria-label={t('collection')}>
-           <div className="panel-head"><div><span className="section-label">{t('collection')}</span><h2>{collection.name}</h2>{!isDemo && <p>{t('by')} <strong>{collection.uploader}</strong> <span className="subtle-separator">·</span> Collector #{collection.id}</p>}</div>{!isDemo && <a className="collector-link" href={`https://osucollector.com/collections/${collection.id}`} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />{t('openCollector')}</a>}</div>
+           <div className="listing-collection-meta"><span>{collection.name}</span>{!isDemo && <a className="listing-collector-link" href={`https://osucollector.com/collections/${collection.id}`} target="_blank" rel="noopener noreferrer" title={t('openCollector')}>Collector <ExternalLink size={12} /></a>}</div>
            {isDemo ? <div className="collector-empty">{t('collectorEmpty')}</div> : <>
-            <div className="stats"><span><b>{collection.maps.length}</b>{t('difficulties')}</span><span><b>{groups.filter(g => g[0].beatmapsetId).length}</b>{t('beatmapsets')}</span><span><b>{isDemo ? '—' : selected.size}</b>{t('selected')}</span></div>
-            {downloadActions('collector')}
-           <MapFiltersPanel language={language} maps={collection.maps} filters={collectorFilters} onChange={setCollectorFilters} id="collector-filters" />
-           <div className="map-tools"><div className="search-box"><Search size={17} /><input aria-label={t('searchLabel')} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('search')} /></div><span className="map-count">{visible.length} {t('results')} · {visible.flat().length} {t('difficulties')}</span></div>
-          <div className="selection-tools"><span>{selected.size} / {available.length} {t('selected')}</span><div><button type="button" disabled={isDemo} onClick={() => setSelected(previous => new Set([...previous, ...visible.flat().filter(m => m.beatmapsetId).map(m => m.id)]))}>{t('selectVisible')}</button><button type="button" disabled={isDemo || !selected.size} onClick={() => setSelected(new Set())}>{t('clear')}</button></div></div>
+           <div className="listing-filter-area"><div className="listing-backdrop" aria-hidden="true">{collection.maps[0]?.cover && <img src={collection.maps[0].cover} alt="" />}</div>{searchBox()}<MapFiltersPanel listing language={language} maps={collection.maps} filters={collectorFilters} onChange={setCollectorFilters} id="collector-filters" /></div>
+           {sortToolbar(`${visible.length} ${t('results')} · ${visible.flat().length} ${t('difficulties')}`)}
+          <div className="listing-selection-bar"><div className="listing-select-tools"><button type="button" disabled={!visible.length} onClick={() => setSelected(previous => new Set([...previous, ...visible.flat().filter(m => m.beatmapsetId).map(m => m.id)]))}>{t('selectVisible')}</button><button type="button" disabled={!selected.size} onClick={() => setSelected(new Set())}>{t('clear')}</button></div>{downloadActions('collector')}</div>
 
-           <div className="map-list">{visible.length === 0 ? <div className="empty-list">{t('emptySearch')}</div> : visible.map(maps => { const map = maps[0]; const ids = maps.filter(m => m.beatmapsetId).map(m => m.id); const checked = ids.length > 0 && ids.every(id => selected.has(id)); const queued = already(map.beatmapsetId); return <article className={`map-row ${checked ? 'is-selected' : ''}`} key={map.beatmapsetId || `missing-${map.id}`}><MapBackground src={map.cover} /><label className="map-checkbox"><input type="checkbox" disabled={isDemo || !ids.length} checked={checked} onChange={() => toggle(ids)} aria-label={`${t('selectMap')} ${map.artist} - ${map.title}`} /><span /></label><div className="map-details"><div className="map-title-line"><div className="map-title"><strong>{map.title}</strong><small>{map.artist} <span>·</span> {t('mappedBy')} {map.creator}{map.bpm ? ` · ${Math.round(map.bpm)} BPM` : ''}</small></div><span className={`map-status ${queued?.status || ''}`}>{mapStatus(queued, map)}</span></div><div className="diff-list"><span className="diff-label">{t('diffLabel')}</span>{maps.map(diff => <button type="button" key={diff.id} title={`ID ${diff.id}${diff.checksum ? ` · MD5 ${diff.checksum}` : ''}`} disabled={isDemo || !diff.beatmapsetId} className={`diff-chip ${selected.has(diff.id) ? 'chosen' : ''}`} onClick={() => toggle([diff.id])}>{diff.version}{diff.stars !== null && <StarRating stars={diff.stars} />}</button>)}</div></div></article> })}</div>
-          <div className="osz-note"><CircleHelp size={16} />{t('oszNote')}</div>
+           <div className={`listing-map-grid ${view === 'list' ? 'is-list' : ''}`}>{visible.length === 0 ? <div className="empty-list">{t('emptySearch')}</div> : visible.map(maps => { const map = maps[0], ids = maps.filter(diff => diff.beatmapsetId).map(diff => diff.id); return <BeatmapCard key={map.beatmapsetId || `missing-${map.id}`} setId={map.beatmapsetId} title={map.title} artist={map.artist} creator={map.creator} cover={map.cover} status={map.status} featuredArtist={map.featuredArtist} language={language} queued={already(map.beatmapsetId)} selected={!!ids.length && ids.every(id => selected.has(id))} onSelect={() => toggle(ids)} onDownload={() => action('enqueue', { collectionId: collection.id, ids })} difficulties={maps.map(diff => ({ key: String(diff.id), version: diff.version, stars: diff.stars, mode: diff.mode, selected: selected.has(diff.id), onSelect: diff.beatmapsetId ? () => toggle([diff.id]) : undefined }))} /> })}</div>
             </>}
         </section>
 
-        </> : <section className="tournament-panel" aria-label={t('tournamentSection')}><div className="panel-head"><div><span className="section-label">{t('tournamentSection')}</span><h2>{t('tournamentPreview')}</h2><p>{state?.tournament ? `${state.tournament.entries.length} ${t('tournamentIds')} · ${tournamentSets.length} ${t('beatmapsets')}` : t('tournamentEmpty')}</p></div></div>
-           {tournamentSets.length > 0 && <>{downloadActions('tournament')}<MapFiltersPanel language={language} maps={state?.tournament?.entries || []} filters={tournamentFilters} onChange={setTournamentFilters} id="tournament-filters" /><div className="selection-tools"><span>{selectedTournament.size} / {tournamentSets.length} {t('selected')} · {visibleTournamentSets.length} {t('results')}</span><div><button type="button" disabled={!visibleTournamentSets.length} onClick={() => setSelectedTournament(previous => new Set([...previous, ...visibleTournamentSets.map(([id]) => id)]))}>{t('selectVisible')}</button><button type="button" disabled={!selectedTournament.size} onClick={() => setSelectedTournament(new Set())}>{t('clear')}</button></div></div>
-             <div className="map-list">{visibleTournamentSets.length ? visibleTournamentSets.map(([id, entries]) => { const entry = entries[0]; const checked = selectedTournament.has(id); const queued = already(id); return <article className={`map-row ${checked ? 'is-selected' : ''}`} key={id}><MapBackground src={entry.cover} /><label className="map-checkbox"><input type="checkbox" checked={checked} onChange={() => setSelectedTournament(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next })} aria-label={`${t('selectMap')} ${entry.artist} - ${entry.title}`} /><span /></label><div className="map-details"><div className="map-title-line"><div className="map-title"><strong>{entry.title}</strong><small>{entry.artist} <span>·</span> {t('mappedBy')} {entry.creator}{entry.bpm ? ` · ${Math.round(entry.bpm)} BPM` : ''}</small></div><span className={`map-status ${queued?.status || ''}`}>{queued ? queued.status === 'done' ? t('downloadedHere') : t(queued.status) : entry.status.toUpperCase()}</span></div><div className="diff-list"><span className="diff-label">{t('beatmapsetId')} #{id}</span>{entries.map(e => <span className="diff-chip" key={`${e.kind}-${e.requestedId}`} title={e.checksum ? `MD5 ${e.checksum}` : undefined}>{e.difficultyId ? `${e.version || t('beatmapId')} #${e.difficultyId}` : `${t('beatmapsetId')} #${id}`}{e.stars !== null && <StarRating stars={e.stars} />}</span>)}</div></div></article> }) : <div className="empty-list">{t('emptySearch')}</div>}</div>
-             <div className="osz-note"><CircleHelp size={16} />{t('oszNote')}</div></>}
+        </> : <section className="tournament-panel" aria-label={t('tournamentSection')}><div className="listing-collection-meta"><span>{t('tournamentPreview')}</span><span>{state?.tournament?.entries.length || 0} {t('tournamentIds')}</span></div>
+           {tournamentSets.length > 0 && <><div className="listing-filter-area"><div className="listing-backdrop" aria-hidden="true">{state?.tournament?.entries[0]?.cover && <img src={state.tournament.entries[0].cover} alt="" />}</div>{searchBox()}<MapFiltersPanel listing language={language} maps={state?.tournament?.entries || []} filters={tournamentFilters} onChange={setTournamentFilters} id="tournament-filters" /></div>{sortToolbar(`${visibleTournamentSets.length} ${t('results')}`)}<div className="listing-selection-bar"><div className="listing-select-tools"><button type="button" disabled={!visibleTournamentSets.length} onClick={() => setSelectedTournament(previous => new Set([...previous, ...visibleTournamentSets.map(([id]) => id)]))}>{t('selectVisible')}</button><button type="button" disabled={!selectedTournament.size} onClick={() => setSelectedTournament(new Set())}>{t('clear')}</button></div>{downloadActions('tournament')}</div>
+             <div className={`listing-map-grid ${view === 'list' ? 'is-list' : ''}`}>{visibleTournamentSets.length ? visibleTournamentSets.map(([id, entries]) => { const entry = entries[0]; const toggleSet = () => setSelectedTournament(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next }); const diffs = entries.flatMap(e => e.difficultyId === null && e.setDifficulties?.length ? e.setDifficulties.filter(diff => matchesMapFilters({ ...diff, difficultyId: diff.id }, tournamentFilters)).map(diff => ({ key: String(diff.id), version: `#${diff.id}`, stars: diff.stars, mode: diff.mode })) : [{ key: e.difficultyId ? String(e.difficultyId) : `set-${id}`, version: e.version, stars: e.stars, mode: e.mode }]); return <BeatmapCard key={id} setId={id} title={entry.title} artist={entry.artist} creator={entry.creator} cover={entry.cover} status={entry.status} featuredArtist={entry.featuredArtist} language={language} queued={already(id)} selected={selectedTournament.has(id)} onSelect={toggleSet} onDownload={() => action('tournament/enqueue', { ids: [id] })} difficulties={[...new Map(diffs.map(diff => [diff.key, diff])).values()].map(diff => ({ ...diff, selected: selectedTournament.has(id), onSelect: toggleSet }))} /> }) : <div className="empty-list">{t('emptySearch')}</div>}</div></>}
           {!!state?.tournament?.failures.length && <div className="tournament-failures"><strong>{t('unresolved')} ({state.tournament.failures.length})</strong><ul>{state.tournament.failures.map((failure, i) => <li key={i}><code>{failure.source}</code> — {localizeError(failure.reason, language)}</li>)}</ul></div>}
         </section>}
         </div>
 
-        <div className="side-panels"><section className="queue-panel" id="queue"><div className="side-heading"><div><span className="section-label">{t('queue')}</span><h2>{t('queue')} <small>{state?.queue.length || 0}</small></h2></div><button type="button" className="icon-button" aria-label={queueOpen ? t('collapse') : t('expand')} onClick={() => setQueueOpen(!queueOpen)}><ChevronDown size={17} className={queueOpen ? '' : 'rotate'} /></button></div>
-          {queueOpen && <><div className="queue-progress"><div><span>{outstanding ? state?.paused ? t('paused') : t('inProgress') : failed ? t('attention') : state?.queue.length ? t('allDone') : t('ready')}</span><strong>{done} / {state?.queue.length || 0}</strong></div><div className="progress-track"><div style={{ width: `${state?.queue.length ? done / state.queue.length * 100 : 0}%` }} /></div><small>{done} {t('completed')} · {outstanding} {t('remaining')}</small></div>
-          {state?.queue.length ? <div className="queue-list">{[...state.queue].reverse().map(item => <div className="queue-item" key={item.key}><span className={`queue-icon ${item.status}`}>{item.status === 'done' ? <Check size={15} /> : item.status === 'downloading' ? <ArrowDownToLine size={15} /> : item.status === 'failed' ? <X size={15} /> : item.status === 'cancelled' ? <Square size={12} /> : <Clock3 size={15} />}</span><div><strong>{item.title}</strong><small>{item.artist} · #{item.beatmapsetId}</small><span className={`queue-state ${item.status}`}>{item.status === 'downloading' ? item.error ? localizeError(item.error, language) : `${t('downloading')}${item.total ? ` · ${Math.min(100, Math.floor(item.bytes / item.total * 100))}%` : item.bytes ? ` · ${formatBytes(item.bytes)} (${t('sizeUnknown')})` : ` · ${t('preparing')}`}` : item.status === 'failed' ? `${t('failed')} · ${localizeError(item.error || '', language)}` : item.status === 'pending' ? item.error ? localizeError(item.error, language) : t('pending') : t(item.status)}</span>{item.status === 'downloading' && <div className={`item-progress ${item.total ? '' : 'indeterminate'}`}><div style={item.total ? { width: `${Math.min(100, item.bytes / item.total * 100)}%` } : undefined} /></div>}</div></div>)}</div> : <div className="empty-queue"><ArrowDownToLine size={22} /><strong>{t('queueEmpty')}</strong><p>{t('queueEmptyHelp')}</p></div>}
-          <div className="queue-controls"><button type="button" disabled={!outstanding || !!state?.paused} onClick={() => void action('pause')}><Pause size={14} />{t('pause')}</button><button type="button" disabled={!state?.paused || !outstanding} onClick={() => void action('resume')}><Play size={14} />{t('resume')}</button><button type="button" disabled={!outstanding} onClick={() => void action('cancel')}><Square size={13} />{t('cancel')}</button></div>{failed > 0 && <button type="button" className="retry-button" onClick={() => void action('retry')}><RefreshCcw size={14} />{t('retry')} ({failed})</button>}{!!state?.queue.length && <button type="button" className="queue-clear" disabled={!!outstanding} title={outstanding ? t('queueClearBlocked') : undefined} onClick={() => { if (window.confirm(t('queueClearConfirm'))) void action('queue/clear') }}><Trash2 size={14} />{t('queueClear')}</button>}<p className="panel-hint">{t('pauseHint')}</p></>}
-        </section>
-
-        <section className="settings-panel" id="settings"><div className="side-heading"><div><span className="section-label">{t('settings')}</span><h2>{t('directory')}</h2></div><button type="button" className="icon-button" onClick={openSettings} aria-label={t('settings')}><Settings2 size={17} /></button></div><p className="settings-description">{t('settingsDescription')}</p><div className="folder-path"><FolderOpen size={17} /><span title={state?.settings.directory}>{state?.settings.directory || '...'}</span></div><button type="button" className="secondary-button settings-link" onClick={openSettings}>{t('openSettings')}</button>
-        </section><p className="installed-note">{t('installedNote')}</p></div>
       </div>
 
-      {activeSection === 'collector' && !!state?.collections.length && <section className="recent"><div className="recent-heading"><span className="section-label">{t('recent')}</span><button type="button" onClick={() => { if (window.confirm(t('clearRecentConfirm'))) { void action('collections/clear'); setSelected(new Set()); setQuery('') } }}>{t('clearRecent')}</button></div><div>{state.collections.map(c => <button type="button" key={c.id} className={c.id === collection.id ? 'current' : ''} onClick={() => { void action('show', { id: c.id }); setSelected(new Set()); setQuery(''); setActiveSection('collector') }}>{c.name} <small>#{c.id}</small></button>)}</div></section>}</>}
+      {activeSection === 'collector' && !!state?.collections.length && <details className="recent listing-recent"><summary>{t('recent')}<ChevronDown size={13} /></summary><div>{state.collections.map(c => <button type="button" key={c.id} className={c.id === collection.id ? 'current' : ''} onClick={() => { void action('show', { id: c.id }); setSelected(new Set()); setQuery('') }}>{c.name}</button>)}<button type="button" onClick={() => { if (window.confirm(t('clearRecentConfirm'))) { void action('collections/clear'); setSelected(new Set()); setQuery('') } }}>{t('clearRecent')}</button></div></details>}</>}
       <footer><span>PACC-BD</span><span>{t('independent')}</span></footer>
     </main>
   </div>

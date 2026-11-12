@@ -23,7 +23,7 @@ export function UpdateChecker({ language }: { language: Language }) {
   }
 
   return <div className="update-checker">
-    <button type="button" className="update-trigger" aria-expanded={open} onClick={() => void check()}><RefreshCcw size={14} />{t('checkUpdates')}</button>
+    <button type="button" className="update-trigger" aria-expanded={open} title={t('checkUpdates')} onClick={() => void check()}><RefreshCcw size={14} />{t('checkUpdates')}</button>
     {open && <div className="update-popover" role="status"><button type="button" className="update-dismiss" aria-label={t('dismissNotice')} onClick={() => setOpen(false)}><X size={15} /></button>
       <strong>{t('updatesTitle')}</strong>
       {busy && <p><LoaderCircle size={14} className="spin" /> {t('updateChecking')}</p>}
