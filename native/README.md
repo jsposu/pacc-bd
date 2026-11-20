@@ -13,8 +13,14 @@ cargo run
 ```
 
 First compilation installs the pinned toolchain and downloads Cargo dependencies.
-Linux needs X11/Wayland and Slint's winit/software backend system libraries.
-This is an experimental renderer choice, **not a performance benchmark**.
+Linux needs X11/Wayland and the system libraries for Slint's winit backend.
+The default rendering path is now **FemtoVG / OpenGL**, with software fallback.
+`cargo run` still uses a development build, but our code is optimized at level 1
+and dependencies at level 2. The first rebuild therefore takes longer. For normal
+performance comparisons use **`cargo run --release`**; Rust alone does not guarantee
+better performance and these choices are not a hardware benchmark.
+
+If OpenGL is unavailable, explicitly select `SLINT_BACKEND=winit-software`.
 
 ### Try actual downloads
 
@@ -35,6 +41,26 @@ Settings changes the absolute download folder, mirror (osu.direct / catboy.best)
 and theme. Each queued item keeps its original destination folder. The chosen
 mirror is read when a transfer starts. Title/cover links open the official osu!
 beatmapset page. Click **details** to inspect individual unmodded stats.
+
+**Open downloads** in the header opens the saved destination in the OS file
+manager (shown as **Files** on narrow windows). If it does not exist yet, this
+explicit action creates it. Unsaved path edits in Settings do not change the
+destination. Opening runs off the UI thread and errors appear in the status note.
+
+### Interface and scrolling
+
+- Stars use the osu! spectrum, sheared double handles, readable high-star labels
+  and an infinity upper bound. AR is red, OD orange, CS blue, HP green, length
+  purple; BPM moves from blue to red. Mouse/touch and arrow/Home/End keys work.
+- Controls have padded glass-like surfaces with visible outlines, focus/selected
+  states, highlights and a **preblurred** artwork tint. This is not Apple's native
+  Liquid Glass or a per-frame backdrop blur; avoiding that expensive filter is
+  deliberate. Both the custom controls and standard widgets follow Light/Dark.
+- Only a small viewport window of cards is instantiated, not the full collection.
+  Off-screen controls are not painted. Placeholder pixels are shared between all
+  maps (three textures), covers use smaller thumbnails and a 256-entry cache.
+- Artwork updates change a single model row. Download byte progress does not reset
+  the map model or rebuild the grid.
 
 ## Implemented
 
@@ -90,9 +116,15 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo run -- --smoke-test --data-dir /tmp/opencode/pacc-rust-smoke
 cargo run -- --narrow --light --smoke-test --data-dir /tmp/opencode/pacc-rust-smoke-light
+cargo run -- --scroll-test --data-dir /tmp/opencode/pacc-rust-scroll-test
 ```
 
 Normal tests use generated `.osz` fixtures / loopback HTTP, not public downloads.
+The scroll regression creates 10,000 **fixture** maps and checks that the number
+of instantiated card trees stays viewport-bounded while scrolling top to bottom.
+Its event-loop timer samples are diagnostics, **not measured rendering FPS**.
+`--stress` opens the same large fixture interactively. These modes never transfer
+maps or write fake jobs into the real queue.
 Opt-in live checks (internet required):
 
 ```sh
@@ -112,9 +144,12 @@ The dedicated native GitHub workflow runs Windows/Linux tests without publishing
 python3 tools/fetch-reference-assets.py
 cargo run -- --demo
 cargo run -- --demo --screenshot /tmp/opencode/pacc-rust.png
+cargo run -- --demo --advanced --scroll-to 350 --light --screenshot /tmp/opencode/pacc-rust-filters.png
 ```
 
-`--demo` and `--smoke-test` disable **all** real transfers, including recovery.
+While showing fixture data, `--demo`, `--stress` and the smoke checks disable real
+transfers, including recovery. Loading a real source explicitly leaves interactive
+demo mode; fixtures themselves can never be queued as real songs.
 Fixture songs/stats are illustrative. Optional reference covers and original
 DM Sans/Outfit fonts stay in ignored `demo-covers/`. Covers are third-party osu!
 artwork used only for local comparison, not licensed as our code or bundled in a

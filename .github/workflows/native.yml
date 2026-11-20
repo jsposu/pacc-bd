@@ -37,3 +37,11 @@ jobs:
       - name: Native UI smoke test (Windows)
         if: runner.os == 'Windows'
         run: cargo run --locked -- --smoke-test --data-dir "${{ runner.temp }}/pacc-rust-smoke"
+        env:
+          SLINT_BACKEND: winit-software
+      - name: Large-list scroll regression (Linux software fallback)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo run --locked -- --scroll-test --data-dir "${{ runner.temp }}/pacc-rust-scroll"
+        env:
+          SLINT_BACKEND: winit-software
+          SLINT_SCALE_FACTOR: '1'

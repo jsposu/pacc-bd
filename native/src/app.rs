@@ -1,13 +1,13 @@
-use crate::{AppWindow, FilterRange, MapCard, visuals};
+use crate::{AppWindow, FilterRange, MapCard, UiPalette, visuals};
 use pacc_bd_native::{
-    download,
+    desktop, download,
     model::{BeatmapSet, Difficulty, Download, Filters, Mirror, Range, Status, Store},
     network,
 };
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs::{self, File},
     io,
     path::PathBuf,
@@ -27,6 +27,7 @@ enum Event {
     Progress(u64, u64, Option<u64>),
     Message(u64, String),
     Finished(u64, network::Result<PathBuf>),
+    FolderOpened(network::Result<()>),
 }
 struct Running {
     id: u64,
@@ -41,6 +42,9 @@ struct State {
     filters: Filters,
     ranges: Vec<FilterRange>,
     covers: HashMap<u64, (slint::Image, slint::Image)>,
+    cover_order: VecDeque<u64>,
+    placeholders: Vec<(slint::Image, slint::Image)>,
+    view_positions: HashMap<u64, usize>,
     client: reqwest::blocking::Client,
     sender: Sender<Event>,
     running: Option<Running>,
@@ -50,6 +54,15 @@ struct State {
     demo: bool,
     demo_sets: Vec<BeatmapSet>,
     next_start: Instant,
+}
+
+fn locked_downloads(queue: &[Download], running: Option<u64>) -> HashSet<u64> {
+    queue
+        .iter()
+        .filter(|item| item.status != Status::Cancelled)
+        .map(|item| item.id)
+        .chain(running)
+        .collect()
 }
 
 impl State {
@@ -102,7 +115,19 @@ impl State {
         self.filters.featured = ui.get_featured();
         self.filters.unknown = ui.get_include_unknown();
     }
-    fn refresh(&self, ui: &AppWindow) {
+    fn insert_cover(&mut self, id: u64, pair: (slint::Image, slint::Image)) {
+        if !self.covers.contains_key(&id) {
+            self.cover_order.push_back(id);
+        }
+        self.covers.insert(id, pair);
+        while self.cover_order.len() > 256 {
+            if let Some(old) = self.cover_order.pop_front() {
+                self.covers.remove(&old);
+            }
+        }
+    }
+    fn refresh(&mut self, ui: &AppWindow) {
+        let locked = locked_downloads(&self.store.queue, self.running.as_ref().map(|job| job.id));
         let query = ui.get_search().to_string();
         let mut sets: Vec<_> = self
             .groups(ui.get_page())
@@ -124,12 +149,12 @@ impl State {
         let maps: Vec<_> = sets
             .into_iter()
             .map(|set| {
-                let (cover, glow) = self.covers.get(&set.id).cloned().unwrap_or_default();
-                let queued = self
-                    .store
-                    .queue
-                    .iter()
-                    .any(|item| item.id == set.id && item.status != Status::Cancelled);
+                let (cover, glow) = self
+                    .covers
+                    .get(&set.id)
+                    .cloned()
+                    .unwrap_or_else(|| self.placeholders[(set.id % 3) as usize].clone());
+                let queued = locked.contains(&set.id);
                 let diffs = self.filters.matching_difficulties(set, &query);
                 let stars = diffs
                     .iter()
@@ -173,6 +198,11 @@ impl State {
                 }
             })
             .collect();
+        self.view_positions = maps
+            .iter()
+            .enumerate()
+            .map(|(index, map)| (map.id as u64, index))
+            .collect();
         ui.set_maps(ModelRc::new(VecModel::from(maps)));
         ui.set_selected_count(self.selected.len() as i32);
         ui.set_live(!self.demo);
@@ -188,6 +218,7 @@ impl State {
         self.refresh_queue(ui);
     }
     fn refresh_queue(&self, ui: &AppWindow) {
+        ui.set_download_location(self.store.directory.to_string_lossy().into_owned().into());
         ui.set_paused(self.paused);
         ui.set_queue_count(self.store.queue.len() as i32);
         let done = self
@@ -260,6 +291,10 @@ impl State {
                 )
                 .into(),
             );
+        } else if self.running.is_some() {
+            ui.set_queue_summary("Cancelling active transfer…".into());
+            ui.set_transfer_label("Waiting for the network operation to stop".into());
+            ui.set_progress(-1.0);
         } else {
             ui.set_queue_summary(
                 if self.paused {
@@ -295,10 +330,12 @@ impl State {
             ui.set_notice("Choose Recover or Discard before adding downloads".into());
             return;
         }
+        let wanted: HashSet<_> = ids.into_iter().collect();
+        let locked = locked_downloads(&self.store.queue, self.running.as_ref().map(|job| job.id));
         let sets: Vec<_> = self
             .groups(ui.get_page())
             .iter()
-            .filter(|set| ids.contains(&set.id))
+            .filter(|set| wanted.contains(&set.id) && !locked.contains(&set.id))
             .cloned()
             .collect();
         for set in sets {
@@ -306,6 +343,21 @@ impl State {
         }
         self.persist(ui);
         self.refresh(ui);
+    }
+    fn refresh_downloadable(&self, ui: &AppWindow, id: u64) {
+        let Some(index) = self.view_positions.get(&id).copied() else {
+            return;
+        };
+        let model = ui.get_maps();
+        if let Some(rows) = model.as_any().downcast_ref::<VecModel<MapCard>>()
+            && let Some(mut row) = rows.row_data(index)
+        {
+            row.downloadable = !self.demo
+                && self.recovery.is_empty()
+                && !locked_downloads(&self.store.queue, self.running.as_ref().map(|job| job.id))
+                    .contains(&id);
+            rows.set_row_data(index, row);
+        }
     }
     fn drive(&mut self, ui: &AppWindow) {
         if self.demo
@@ -327,6 +379,7 @@ impl State {
         self.store.queue[index].status = Status::Downloading;
         if !self.persist(ui) {
             self.store.queue[index].status = Status::Pending;
+            self.refresh_queue(ui);
             return;
         }
         let item = self.store.queue[index].clone();
@@ -357,8 +410,24 @@ impl State {
             result
         });
         self.running = Some(Running { id, cancel, thread });
-        self.refresh(ui);
+        self.refresh_queue(ui);
     }
+}
+
+fn update_cover_row(
+    model: &ModelRc<MapCard>,
+    index: usize,
+    pair: &(slint::Image, slint::Image),
+) -> bool {
+    if let Some(rows) = model.as_any().downcast_ref::<VecModel<MapCard>>()
+        && let Some(mut row) = rows.row_data(index)
+    {
+        row.cover = pair.0.clone();
+        row.glow = pair.1.clone();
+        rows.set_row_data(index, row);
+        return true;
+    }
+    false
 }
 
 fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
@@ -368,12 +437,6 @@ fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
             match result {
                 Ok((name, sets, errors)) => {
                     state.successful_loads += 1;
-                    for (index, set) in sets.iter().enumerate() {
-                        state.covers.entry(set.id).or_insert_with(|| {
-                            let image = visuals::placeholder(index);
-                            (image.clone(), image)
-                        });
-                    }
                     let count = sets.len();
                     if page == 0 {
                         state.store.collection_name = name;
@@ -398,8 +461,21 @@ fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
             }
         }
         Event::Cover(id, cover) => {
-            state.covers.insert(id, visuals::images(cover));
+            let pair = visuals::images(cover);
+            state.insert_cover(id, pair.clone());
+            // One row update, not a model reset / full-grid layout per image.
+            if let Some(index) = state.view_positions.get(&id).copied() {
+                let model = ui.get_maps();
+                update_cover_row(&model, index, &pair);
+                if index == 0 {
+                    ui.set_ambience(pair.1);
+                }
+            }
         }
+        Event::FolderOpened(result) => match result {
+            Ok(()) => ui.set_notice("Opened the configured download folder.".into()),
+            Err(error) => ui.set_notice(format!("Cannot open download folder: {error}").into()),
+        },
         Event::Progress(id, bytes, total) => {
             if let Some(item) = state
                 .store
@@ -444,6 +520,7 @@ fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
             }
             state.next_start = Instant::now() + Duration::from_millis(1600);
             state.persist(ui);
+            state.refresh_downloadable(ui, id);
         }
     }
 }
@@ -542,6 +619,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|arg| arg == "--smoke-live") && !args.iter().any(|arg| arg == "--data-dir") {
         return Err("--smoke-live requires an isolated --data-dir".into());
     }
+    if args.iter().any(|arg| arg == "--scroll-test") && !args.iter().any(|arg| arg == "--data-dir")
+    {
+        return Err("--scroll-test requires an isolated --data-dir".into());
+    }
     let client = network::client().map_err(io::Error::other)?;
     if let Some(index) = args.iter().position(|arg| arg == "--check-collection") {
         let id = network::collection_id(args.get(index + 1).ok_or("Missing collection ID")?)
@@ -604,12 +685,38 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let ui = AppWindow::new()?;
+    ui.global::<UiPalette>()
+        .on_star_colour(visuals::star_colour);
+    ui.global::<UiPalette>()
+        .on_star_handle(visuals::star_handle);
+    ui.global::<UiPalette>().on_star_ink(visuals::star_ink);
+    ui.global::<UiPalette>().on_bpm_colour(visuals::bpm_colour);
+    let _ = ui.window().set_rendering_notifier(|state, api| {
+        if matches!(state, slint::RenderingState::RenderingSetup) {
+            println!("Graphics renderer: {api:?}");
+        }
+    });
     ui.window().set_size(slint::LogicalSize::new(1440.0, 980.0));
     let mut store = Store::open(&directory)?;
     let recovery = store.take_recovery();
     let demo = args
         .iter()
-        .any(|arg| ["--demo", "--smoke-test"].contains(&arg.as_str()));
+        .any(|arg| ["--demo", "--smoke-test", "--stress", "--scroll-test"].contains(&arg.as_str()));
+    let mut demo_sets = fixtures();
+    if args
+        .iter()
+        .any(|arg| ["--stress", "--scroll-test"].contains(&arg.as_str()))
+    {
+        let original = demo_sets.clone();
+        demo_sets = (0..10000)
+            .map(|index| {
+                let mut set = original[index % original.len()].clone();
+                set.id = 10_000_000 + index as u64;
+                set.title = format!("{} · {:05}", set.title, index + 1);
+                set
+            })
+            .collect();
+    }
     let (sender, receiver) = mpsc::channel();
     let mut state = State {
         store,
@@ -619,6 +726,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         filters: Filters::default(),
         ranges: ranges(),
         covers: HashMap::new(),
+        cover_order: VecDeque::new(),
+        placeholders: (0..3)
+            .map(|index| {
+                let image = visuals::placeholder(index);
+                (image.clone(), image)
+            })
+            .collect(),
+        view_positions: HashMap::new(),
         client,
         sender,
         running: None,
@@ -626,7 +741,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         busy: false,
         successful_loads: 0,
         demo,
-        demo_sets: fixtures(),
+        demo_sets,
         next_start: Instant::now(),
     };
     println!(
@@ -640,17 +755,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .chain(state.store.ids.iter())
         .cloned()
         .collect();
-    for (index, set) in initial.iter().enumerate() {
+    for set in initial.iter().take(150) {
         let file = fonts.join(format!("{}.jpg", set.id));
         let pair = fs::read(file)
             .map_err(|e| e.to_string())
             .and_then(visuals::decode)
-            .map(visuals::images)
-            .unwrap_or_else(|_| {
-                let image = visuals::placeholder(index);
-                (image.clone(), image)
-            });
-        state.covers.insert(set.id, pair);
+            .map(visuals::images);
+        if let Ok(pair) = pair {
+            state.insert_cover(set.id, pair);
+        }
     }
     if !demo {
         start_covers(state.client.clone(), state.sender.clone(), initial);
@@ -661,8 +774,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_spanish(state.store.spanish);
     ui.set_triangles(visuals::triangles());
     ui.set_ranges(ModelRc::new(VecModel::from(state.ranges.clone())));
+    ui.set_source_open(state.demo || state.groups(0).is_empty());
     state.refresh(&ui);
     let data = Rc::new(RefCell::new(state));
+
+    let state = data.clone();
+    ui.on_open_download_folder(move || {
+        let state = state.borrow();
+        let directory = state.store.directory.clone();
+        let sender = state.sender.clone();
+        thread::spawn(move || {
+            let result =
+                desktop::open_download_folder(&directory).map_err(|error| error.to_string());
+            let _ = sender.send(Event::FolderOpened(result));
+        });
+    });
 
     let weak = ui.as_weak();
     let state = data.clone();
@@ -680,6 +806,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut state = state.borrow_mut();
             state.selected.clear();
             ui.set_source_input("".into());
+            ui.set_scroll_y(0.0);
+            ui.set_source_open(state.demo || state.groups(ui.get_page()).is_empty());
             state.refresh(&ui);
         }
     });
@@ -848,6 +976,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Mirror::Direct
             };
             if state.persist(&ui) {
+                ui.set_download_location(
+                    state.store.directory.to_string_lossy().into_owned().into(),
+                );
                 ui.set_notice(
                     "Settings saved. Existing queue entries retain their original target folder."
                         .into(),
@@ -965,6 +1096,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match &event {
                         Event::Progress(..) => transfer_changed = true,
                         Event::Message(..) => queue_changed = true,
+                        Event::Finished(..) => queue_changed = true,
+                        Event::Cover(..) | Event::FolderOpened(..) => {}
                         _ => listing_changed = true,
                     }
                     handle_event(&mut state, &ui, event);
@@ -982,6 +1115,38 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     let live_test = slint::Timer::default();
+    let scroll_test = slint::Timer::default();
+    if args.iter().any(|arg| arg == "--scroll-test") {
+        if !data.borrow().recovery.is_empty() {
+            return Err("Use a fresh profile for --scroll-test".into());
+        }
+        ui.set_more(true);
+        let weak = ui.as_weak();
+        let state = data.clone();
+        let mut step = 0usize;
+        let mut last = Instant::now();
+        let mut samples = Vec::<f64>::new();
+        scroll_test.start(slint::TimerMode::Repeated,Duration::from_millis(16),move||{
+            if let Some(ui)=weak.upgrade(){
+                if step>15 {samples.push(last.elapsed().as_secs_f64()*1000.0);}
+                last=Instant::now();
+                if step>5 {
+                    assert_eq!(ui.get_maps().row_count(),10000);
+                    let bound=((ui.get_viewport_height()/184.0).ceil() as i32+3)*ui.get_columns();
+                    assert!(ui.get_rendered_card_count()>0 && ui.get_rendered_card_count()<=bound);
+                    assert_eq!(state.borrow().placeholders.len(),3);
+                }
+                let maximum=(ui.get_document_height()-ui.get_viewport_height()).max(0.0);
+                ui.set_scroll_y(-maximum*((step%121) as f32/120.0));
+                step+=1;
+                if step>=123 {
+                    samples.sort_by(f64::total_cmp);
+                    println!("Scroll stress passed: 10,000 maps; {} card trees; 3 shared placeholders. Event-loop tick p50 {:.1} ms / p95 {:.1} ms (not an FPS benchmark).",ui.get_rendered_card_count(),samples[samples.len()/2],samples[(samples.len()-1)*95/100]);
+                    ui.hide().unwrap();slint::quit_event_loop().unwrap();
+                }
+            }
+        });
+    }
     if args.iter().any(|arg| arg == "--smoke-live") {
         if !data.borrow().recovery.is_empty() {
             return Err("Live UI test needs a profile with no pending queue".into());
@@ -1016,6 +1181,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.iter().any(|arg| arg == "--narrow") {
         ui.window().set_size(slint::LogicalSize::new(440.0, 900.0));
+    }
+    if args.iter().any(|arg| arg == "--advanced") {
+        ui.set_more(true);
+    }
+    if let Some(index) = args.iter().position(|arg| arg == "--scroll-to") {
+        let offset = args
+            .get(index + 1)
+            .ok_or("--scroll-to requires a pixel offset")?
+            .parse::<f32>()?;
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(150), move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_scroll_y(-offset.max(0.0));
+            }
+        });
     }
     if args.iter().any(|arg| arg == "--smoke-test") {
         let weak = ui.as_weak();
@@ -1112,6 +1292,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     ui.run()?;
     timer.stop();
+    scroll_test.stop();
+    live_test.stop();
     let mut state = data.borrow_mut();
     if let Some(running) = state.running.take() {
         running.cancel.store(true, Ordering::Relaxed);
@@ -1144,4 +1326,50 @@ fn stat(value: Option<f32>) -> String {
     value
         .map(|v| format!("{v:.2}"))
         .unwrap_or_else(|| "Unknown".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cancelling_a_job_keeps_it_locked_until_its_worker_exits() {
+        let queue = vec![Download {
+            id: 42,
+            title: "Song".into(),
+            status: Status::Cancelled,
+            error: String::new(),
+            file: None,
+            directory: None,
+            bytes: 0,
+            total: None,
+        }];
+        assert!(locked_downloads(&queue, Some(42)).contains(&42));
+        assert!(!locked_downloads(&queue, None).contains(&42));
+    }
+    #[test]
+    fn loading_artwork_updates_only_one_row_without_replacing_the_model() {
+        let model = ModelRc::new(VecModel::from(vec![
+            MapCard {
+                id: 42,
+                title: "Selected song".into(),
+                selected: true,
+                ..Default::default()
+            },
+            MapCard {
+                id: 43,
+                title: "Unchanged song".into(),
+                ..Default::default()
+            },
+        ]));
+        let clone = model.clone();
+        let image =
+            slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(3, 2));
+        assert!(update_cover_row(&model, 0, &(image.clone(), image)));
+        assert_eq!(clone.row_count(), 2);
+        assert_eq!(clone.row_data(0).unwrap().cover.size().width, 3);
+        assert!(clone.row_data(0).unwrap().selected);
+        assert_eq!(clone.row_data(1).unwrap().title, "Unchanged song");
+        assert_eq!(clone.row_data(1).unwrap().cover.size().width, 0);
+        assert!(!update_cover_row(&model, 9, &Default::default()));
+    }
 }

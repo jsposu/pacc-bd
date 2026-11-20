@@ -1,4 +1,4 @@
-import { ScrollView, AboutSlint, LineEdit } from "std-widgets.slint";
+import { ScrollView, AboutSlint, Palette } from "std-widgets.slint";
 
 export struct MapCard {
     id: int,
@@ -18,29 +18,108 @@ export struct MapCard {
 
 export struct FilterRange { label: string, key: int, lower: float, upper: float, limit: float }
 
+export global UiPalette {
+    pure callback star-colour(float) -> color;
+    pure callback star-handle(float) -> color;
+    pure callback star-ink(float) -> color;
+    pure callback bpm-colour(float) -> color;
+}
+
+global Theme {
+    in-out property <bool> light: false;
+    in-out property <image> glass-art;
+    out property <color> bg: light ? #edf1f7 : #0b1016;
+    out property <color> panel: light ? #f8fafdee : #18232ded;
+    out property <color> raised: light ? #ffffff : #293a49;
+    out property <color> text: light ? #182535 : #f2f6fc;
+    out property <color> muted: light ? #485d72 : #b9cbdd;
+    out property <color> accent: light ? #a52865 : #fc86bc;
+    out property <color> primary-ink: light ? #ffffff : #281525;
+    out property <color> outline: light ? #a5b5c7 : #617a91;
+    out property <color> glass: light ? #ffffffcf : #233444d9;
+    out property <color> glass-top: light ? #ffffff9c : #b2d4f01b;
+    out property <color> glass-bottom: light ? #e8f0f77a : #111c2845;
+    out property <color> glint: light ? #ffffffeb : #e0f1ff55;
+    out property <color> hover: light ? #edf3fc : #354b60;
+    out property <color> selected: light ? #f8e4ef : #543248;
+    out property <color> unselected: light ? #edf1f7a0 : #09121ba0;
+}
+
+// Use the already blurred cover, not an expensive live backdrop filter on every
+// control. It gives the glass a soft tint with identical software/GPU behaviour.
+component GlassBox inherits Rectangle {
+    in property <bool> frosted: true;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: Theme.outline;
+    background: Theme.glass;
+    clip: true;
+    if root.frosted: Image { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; source: Theme.glass-art; image-fit: cover; opacity: Theme.light ? 0.045 : 0.12; }
+    if root.frosted: Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; border-radius: 8px; background: @linear-gradient(160deg, Theme.glass-top, Theme.glass-bottom); }
+    if root.frosted: Rectangle { x: 9px; y: 1px; width: parent.width - 18px; height: 1px; background: Theme.glint; }
+    @children
+}
+
+component GlassInput inherits GlassBox {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <length> text-size: 14px;
+    height: 44px;
+    border-color: input.has-focus ? Theme.accent : Theme.outline;
+    border-width: input.has-focus ? 2px : 1px;
+    TouchArea { clicked => { input.focus(); } }
+    input := TextInput { x: 14px; y: 0px; width: parent.width - 28px; height: parent.height;
+        text <=> root.text; single-line: true; color: Theme.text; font-size: root.text-size;
+        selection-background-color: Theme.accent; selection-foreground-color: Theme.primary-ink;
+        vertical-alignment: center;
+    }
+    if root.text == "": Text { x: 14px; y: 0px; width: parent.width - 28px; height: parent.height; text: root.placeholder; color: Theme.muted; font-size: root.text-size; vertical-alignment: center; overflow: elide; }
+}
+
+component RangeThumb inherits Rectangle {
+    in property <color> fill;
+    in property <color> ink;
+    in property <string> value;
+    in property <bool> focused;
+    width: 44px; height: 32px;
+    Path { width: parent.width; height: parent.height; commands: "M 7 1 L 43 1 L 36 31 L 0 31 Z"; fill: root.fill; stroke: root.focused ? Theme.accent : Theme.outline; stroke-width: root.focused ? 2px : 1px; }
+    Text { x: 4px; y: 0px; width: 34px; height: parent.height; text: root.value; color: root.ink; font-size: 12px; font-weight: 750; horizontal-alignment: center; vertical-alignment: center; }
+}
+
 component DualRange inherits Rectangle {
     in property <string> label;
+    in property <int> kind: 0;
+    in property <bool> primary: false;
     in property <float> limit: 10;
     in-out property <float> lower: 0;
     in-out property <float> upper: 10;
     callback edited(float, float);
-    in property <brush> spectrum: root.label == "BPM" ? @linear-gradient(90deg, #58a6ff, #ef6575) : @linear-gradient(90deg, #6966ad, #b49fdd);
+    property <color> accent: kind == 2 ? #ff7376 : kind == 3 ? #ffae67 : kind == 4 ? #68aaff : kind == 5 ? #61cd91 : #c18bfa;
+    in property <brush> spectrum: root.kind == 0 ? @linear-gradient(90deg, #4290fb 0%, #4290fb 1%, #4fc0ff 12.5%, #4fffd5 20%, #7cff4f 25%, #f6f05c 33%, #ff8068 42%, #ff4e6f 49%, #c645b8 58%, #6563de 67%, #18158e 77%, #000000 90%, #000000 100%) : root.kind == 1 ? @linear-gradient(90deg, #58a6ff 0%, #58a6ff 20%, #ef6575 80%, #ef6575 100%) : root.accent;
     property <bool> moving-upper: false;
     property <float> step: root.limit > 20 ? 1 : 0.1;
-    height: 54px;
+    property <length> track-y: primary ? 20px : 38px;
+    height: primary ? 50px : 72px;
     function update(value: float) {
-        if root.moving-upper { root.upper = max(root.lower, min(root.limit, round(value / root.step) * root.step)); }
-        else { root.lower = min(root.upper, max(0, round(value / root.step) * root.step)); }
+        let next = root.moving-upper ? max(root.lower, min(root.limit, round(value / root.step) * root.step)) : min(root.upper, max(0, round(value / root.step) * root.step));
+        if root.moving-upper { if next == root.upper { return; } root.upper = next; }
+        else { if next == root.lower { return; } root.lower = next; }
         root.edited(root.lower, root.upper);
     }
-    Text { x: 0px; y: 0px; width: parent.width; height: 17px; text: root.label + "   " + round(root.lower * 10) / 10 + " – " + (root.upper >= root.limit ? "∞" : round(root.upper * 10) / 10); font-size: 10px; color: Theme.muted; }
-    Rectangle { x: 0px; y: 22px; width: parent.width; height: 26px; border-radius: 4px; background: root.spectrum; border-width: 1px; border-color: #79909a88;
-        Rectangle { x: root.lower / root.limit * (parent.width - 28px); y: 0px; width: 28px; height: 26px; background: #3296ed; border-radius: 3px;
-            Text { text: round(root.lower * 10) / 10; color: #102030; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-        }
-        Rectangle { x: root.upper / root.limit * (parent.width - 28px); y: 0px; width: 28px; height: 26px; background: #20252d; border-radius: 3px;
-            Text { text: root.upper >= root.limit ? "∞" : round(root.upper * 10) / 10; color: #ffffff; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-        }
+    if !root.primary: Text { x: 4px; y: 0px; width: parent.width - 8px; height: 20px; text: root.label; font-size: 12px; font-weight: 650; color: Theme.text; }
+    Rectangle { x: 22px; y: root.track-y; width: parent.width - 44px; height: root.primary ? 18px : 8px; border-radius: 4px; background: root.spectrum; border-width: 1px; border-color: Theme.outline;
+        Rectangle { x: 0px; y: 0px; width: parent.width * root.lower / root.limit; height: parent.height; background: Theme.unselected; }
+        Rectangle { x: parent.width * root.upper / root.limit; y: 0px; width: parent.width * (1 - root.upper / root.limit); height: parent.height; background: Theme.unselected; }
+    }
+    RangeThumb { x: root.lower / root.limit * (parent.width - 44px); y: root.track-y - (root.primary ? 7px : 12px);
+        fill: root.kind == 0 ? UiPalette.star-handle(root.lower) : root.kind == 1 ? UiPalette.bpm-colour(root.lower) : root.accent;
+        ink: root.kind == 0 ? UiPalette.star-ink(root.lower) : #172332;
+        value: round(root.lower * 10) / 10; focused: lower-focus.has-focus;
+    }
+    RangeThumb { x: root.upper / root.limit * (parent.width - 44px); y: root.track-y - (root.primary ? 7px : 12px);
+        fill: root.kind == 0 ? UiPalette.star-handle(root.upper) : root.kind == 1 ? UiPalette.bpm-colour(root.upper) : root.accent;
+        ink: root.kind == 0 ? UiPalette.star-ink(root.upper) : #172332;
+        value: root.upper >= root.limit ? "∞" : round(root.upper * 10) / 10; focused: upper-focus.has-focus;
     }
     lower-focus := FocusScope { x: 0px; width: 0px;
         key-pressed(event) => {
@@ -62,50 +141,43 @@ component DualRange inherits Rectangle {
             return reject;
         }
     }
-    drag := TouchArea { x: 0px; y: 18px; width: parent.width; height: 36px; mouse-cursor: ew-resize;
+    drag := TouchArea { x: 0px; y: root.track-y - 14px; width: parent.width; height: 44px; mouse-cursor: ew-resize;
         pointer-event(event) => {
             if event.kind == PointerEventKind.down {
-                let value = max(0, min(root.limit, (self.mouse-x - 14px) / (self.width - 28px) * root.limit));
-                root.moving-upper = (value - root.lower) * (value - root.lower) > (value - root.upper) * (value - root.upper);
+                let value = max(0, min(root.limit, (self.mouse-x - 22px) / (self.width - 44px) * root.limit));
+                root.moving-upper = root.lower == root.upper ? value >= root.upper : (value - root.lower) * (value - root.lower) > (value - root.upper) * (value - root.upper);
                 if root.moving-upper { upper-focus.focus(); } else { lower-focus.focus(); }
                 root.update(value);
             }
         }
-        moved => { if self.pressed { root.update((self.mouse-x - 14px) / (self.width - 28px) * root.limit); } }
+        moved => { if self.pressed { root.update((self.mouse-x - 22px) / (self.width - 44px) * root.limit); } }
     }
 }
 
-global Theme {
-    in-out property <bool> light: false;
-    out property <color> bg: light ? #f1eaf0 : #000000;
-    out property <color> panel: light ? #e8e3ea : #1d262b;
-    out property <color> raised: light ? #fff9fc : #28383e;
-    out property <color> text: light ? #342b3a : #f7fafb;
-    out property <color> muted: light ? #4f6677 : #bdd9e2;
-    out property <color> accent: light ? #a82e69 : #fa7eb5;
-}
-
-component Action inherits Rectangle {
+component Action inherits GlassBox {
     in property <string> label;
     in property <bool> primary: false;
     in property <bool> active: false;
     in property <bool> enabled: true;
+    in property <bool> quiet: false;
+    in property <bool> align-left: false;
+    in property <string> description: root.label;
     callback clicked;
-    min-width: 30px;
-    height: 34px;
-    border-radius: 4px;
-    background: primary ? Theme.accent : touch.has-hover ? Theme.raised : transparent;
-    border-width: active ? 1px : 0px;
-    border-color: Theme.accent;
+    min-width: 38px;
+    height: 38px;
+    frosted: !root.primary && !root.quiet;
+    background: primary ? Theme.accent : active ? Theme.selected : touch.has-hover ? Theme.hover : quiet ? transparent : Theme.glass;
+    border-width: active || focus.has-focus ? 2px : quiet ? 0px : 1px;
+    border-color: active || focus.has-focus ? Theme.accent : Theme.outline;
     animate background { duration: 150ms; }
-    Text { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #231523 : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+    Text { x: 10px; y: 0px; width: max(0px,parent.width - 20px); height: parent.height; text: root.label; color: root.primary ? Theme.primary-ink : Theme.text; font-size: 12px; font-weight: root.active || root.primary ? 650 : 500; horizontal-alignment: root.align-left ? left : center; vertical-alignment: center; overflow: elide; }
     opacity: enabled ? 1 : 0.45;
     focus := FocusScope { x: 0px; width: 0px; enabled: root.enabled;
         key-pressed(event) => { if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; } return reject; }
     }
     touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
     accessible-role: button;
-    accessible-label: label;
+    accessible-label: description;
 }
 
 component Card inherits Rectangle {
@@ -114,41 +186,42 @@ component Card inherits Rectangle {
     callback enqueue(int);
     callback open-map(int);
     callback inspect(int);
-    height: 158px;
+    height: 166px;
     border-radius: 10px;
     clip: true;
     background: Theme.panel;
-    border-width: map.selected ? 2px : 0px;
-    border-color: Theme.accent;
+    border-width: map.selected ? 2px : 1px;
+    border-color: map.selected ? Theme.accent : Theme.outline;
     Image { x: 0px; y: 0px; source: root.map.cover; width: parent.width; height: parent.height; image-fit: cover; }
-    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: Theme.light ? @linear-gradient(90deg, #e8e3ea00 0%, #e8e3eaef 27%, #e8e3ead0 70%, #e8e3ea80 100%) : @linear-gradient(90deg, #1d262b00 0%, #1d262bef 27%, #1d262bd0 70%, #1d262b80 100%); }
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: Theme.light ? @linear-gradient(90deg, #f8faff00 0%, #f8fafffa 26%, #f8fafff5 74%, #f8faffde 100%) : @linear-gradient(90deg, #18232d00 0%, #18232df5 26%, #18232ddd 74%, #18232dbb 100%); }
     Rectangle {
         x: 10px; y: 10px; width: 21px; height: 21px; border-radius: 11px;
-        border-width: 2px; border-color: #ffffffb0;
-        background: root.map.selected ? Theme.accent : #00000060;
+        border-width: 2px; border-color: Theme.light ? #3a4e63 : #ffffffcc;
+        background: root.map.selected ? Theme.accent : Theme.light ? #ffffffb0 : #00000060;
         TouchArea { mouse-cursor: pointer; clicked => { root.select(root.map.id); } }
     }
     VerticalLayout {
-        x: 90px; y: 10px; width: parent.width - 126px; height: parent.height - 20px;
-        spacing: 4px;
+        x: 92px; y: 14px; width: parent.width - 134px; height: parent.height - 28px;
+        spacing: 5px;
         Text { text: root.map.title; color: Theme.text; font-family: "Outfit"; font-size: 19px; font-weight: 750; overflow: elide; }
         Text { text: "by " + root.map.artist; color: Theme.text; font-size: 13px; font-weight: 600; overflow: elide; }
-        Text { text: "mapped by " + root.map.mapper; color: Theme.muted; font-size: 10px; overflow: elide; }
+        Text { text: "mapped by " + root.map.mapper; color: Theme.muted; font-size: 11px; overflow: elide; }
         Rectangle { vertical-stretch: 1; background: transparent; }
         HorizontalLayout {
-            height: 21px; spacing: 8px;
-            Rectangle { width: 54px; height: 18px; border-radius: 9px; background: root.map.status == "RANKED" || root.map.status == "APPROVED" ? #b2ef6b : root.map.status == "LOVED" ? #f6a4ce : #b4c4d0;
-                Text { text: root.map.status; font-size: 8px; font-weight: 700; color: #1c3420; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+            height: 22px; spacing: 5px;
+            Rectangle { width: 68px; height: 20px; border-radius: 10px; background: root.map.status == "RANKED" || root.map.status == "APPROVED" ? #b2ef6b : root.map.status == "LOVED" ? #f6a4ce : #b4c4d0;
+                Text { text: root.map.status; font-size: 9px; font-weight: 700; color: #1c3420; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
             }
             Text { text: root.map.mode == "osu" ? "◉" : root.map.mode == "taiko" ? "◎" : root.map.mode == "fruits" ? "◒" : root.map.mode == "mania" ? "▥" : "⋯"; color: Theme.text; font-size: 15px; }
-            for stars in root.map.ratings: Rectangle { width: 7px; height: 15px; border-radius: 4px; background: stars < 0 ? #a7adb7 : stars < 2 ? #4fc0ff : stars < 4 ? #f6f05c : stars < 6 ? #ff4e6f : #6563de; }
+            for stars in root.map.ratings: Rectangle { width: 6px; height: 15px; border-radius: 4px; background: UiPalette.star-colour(stars); border-width: 1px; border-color: Theme.light ? #58708466 : #c1d6e780; }
             Rectangle { horizontal-stretch: 1; }
         }
-        Action { height: 22px; label: root.map.summary; clicked => { root.inspect(root.map.id); } }
+        Action { height: 24px; quiet: true; align-left: true; label: root.map.summary; clicked => { root.inspect(root.map.id); } }
     }
     TouchArea { x: 0px; y: 40px; width: 80px; height: parent.height - 40px; mouse-cursor: pointer; clicked => { root.open-map(root.map.id); } }
     TouchArea { x: 90px; y: 8px; width: parent.width - 126px; height: 24px; mouse-cursor: pointer; clicked => { root.open-map(root.map.id); } }
-    Action { x: parent.width - 34px; y: 54px; width: 32px; height: 46px; label: "↓"; enabled: root.map.downloadable; clicked => { root.enqueue(root.map.id); } }
+    Action { x: parent.width - 40px; y: 60px; width: 36px; height: 42px; quiet: true; label: "↓"; enabled: root.map.downloadable; clicked => { root.enqueue(root.map.id); } }
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: 10px; border-width: root.map.selected ? 2px : 1px; border-color: root.map.selected ? Theme.accent : Theme.outline; }
 }
 
 export component AppWindow inherits Window {
@@ -180,6 +253,7 @@ export component AppWindow inherits Window {
     in-out property <string> source-input;
     in-out property <bool> number-is-set: false;
     in-out property <string> directory;
+    in property <string> download-location;
     in-out property <bool> catboy: false;
     in-out property <string> info-text;
     in-out property <int> mode-index: 0;
@@ -198,6 +272,10 @@ export component AppWindow inherits Window {
     in-out property <int> page: 0;
     in-out property <float> star-min: 0;
     in-out property <float> star-max: 10;
+    in-out property <length> scroll-y: 0px;
+    in-out property <length> document-height;
+    in-out property <length> viewport-height;
+    in-out property <int> rendered-card-count;
     in property <string> notice: "Experimental Rust · .osz files are never imported automatically";
     callback search-changed;
     callback toggle-map(int);
@@ -216,13 +294,16 @@ export component AppWindow inherits Window {
     callback range-edited(int, float, float);
     callback page-changed;
     callback advanced-toggled;
-    changed light => { Theme.light = root.light; root.theme-changed(); }
+    callback open-download-folder;
+    init => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
+    changed light => { Theme.light = root.light; Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; root.theme-changed(); }
     changed spanish => { root.theme-changed(); }
     changed search => { root.search-changed(); }
     changed star-min => { root.search-changed(); }
     changed star-max => { root.search-changed(); }
     changed page => { root.page-changed(); }
     changed more => { root.advanced-toggled(); }
+    changed ambience => { Theme.glass-art = root.ambience; }
     changed mode-index => { root.search-changed(); }
     changed status-index => { root.search-changed(); }
     changed sort-index => { root.search-changed(); }
@@ -232,42 +313,53 @@ export component AppWindow inherits Window {
     out property <int> columns: root.list-view ? 1 : root.width >= 1180px ? 3 : root.width >= 760px ? 2 : 1;
     out property <length> canvas-width: root.width;
     out property <length> canvas-height: root.height;
-    property <length> margin: root.width < 760px ? 12px : 48px;
-    Image { x: 0px; y: 0px; source: root.ambience; width: parent.width; height: 240px; image-fit: cover; opacity: 0.48; }
+    property <length> margin: root.width < 760px ? 16px : 32px;
+    property <length> label-width: root.width < 760px ? 76px : 100px;
+    Image { x: 0px; y: 0px; source: root.ambience; width: parent.width; height: 240px; image-fit: cover; opacity: Theme.light ? 0.12 : 0.40; }
     Rectangle { x: 0px; y: 0px; width: parent.width; height: 250px; background: @linear-gradient(180deg, #00000000 0%, Theme.bg 100%); }
-    Image { x: 0px; y: 0px; source: root.triangles; width: parent.width; height: 120px; image-fit: cover; opacity: 0.3; }
+    Image { x: 0px; y: 0px; source: root.triangles; width: parent.width; height: 120px; image-fit: cover; opacity: Theme.light ? 0.14 : 0.28; }
     VerticalLayout {
         x: 0px; y: 0px; width: root.width; height: root.height;
-        padding-left: root.margin; padding-right: root.margin; padding-top: 12px; padding-bottom: 14px; spacing: 10px;
+        padding-left: root.margin; padding-right: root.margin; padding-top: 16px; padding-bottom: 16px; spacing: 12px;
         Rectangle {
-            height: root.width < 900px ? 100px : 70px;
+            height: root.width < 1280px ? 112px : 72px;
             Text { x: 0px; text: "PACC-BD"; color: Theme.text; font-size: 23px; font-weight: 800; y: 8px; }
             Text { x: 0px; text: "For Panama Accuracy"; color: Theme.muted; font-size: 10px; y: 38px; }
             HorizontalLayout {
-                x: root.width < 900px ? 0px : 165px; y: root.width < 900px ? 58px : 8px;
-                width: min(590px, parent.width); height: 34px; spacing: 8px;
-                Action { horizontal-stretch: 2; label: root.width < 760px ? "osu! Collector" : "osu! Collector Downloader"; active: root.page == 0; clicked => { root.page = 0; } }
-                Action { horizontal-stretch: 2; label: root.width < 760px ? "Beatmap ID" : "Download by Beatmap ID"; active: root.page == 1; clicked => { root.page = 1; } }
-                Action { label: root.spanish ? "Colecciones" : "Collections"; active: root.page == 2; clicked => { root.page = 2; } }
+                x: root.width < 1280px ? 0px : 155px; y: root.width < 1280px ? 62px : 8px;
+                width: min(590px, parent.width); height: 40px; spacing: 8px;
+                Action { horizontal-stretch: 1; label: root.width < 760px ? "Collector" : "osu! Collector Downloader"; active: root.page == 0; clicked => { root.page = 0; } }
+                Action { horizontal-stretch: 1; label: root.width < 760px ? "Beatmap ID" : "Download by Beatmap ID"; active: root.page == 1; clicked => { root.page = 1; } }
+                Action { horizontal-stretch: 1; label: root.spanish ? "Colecciones" : "Collections"; active: root.page == 2; clicked => { root.page = 2; } }
             }
             HorizontalLayout {
-                x: parent.width - self.width; y: 8px; width: root.width < 760px ? 148px : 260px; height: 34px;
-                Action { label: root.light ? "☾ Dark" : "☀ Light"; clicked => { root.light = !root.light; } }
-                Action { label: "Settings"; clicked => { root.page = 3; } }
-                Action { label: root.spanish ? "EN" : "ES"; clicked => { root.spanish = !root.spanish; } }
+                x: parent.width - self.width; y: 8px; width: root.width < 760px ? 202px : 412px; height: 40px; spacing: 6px; alignment: end;
+                Action { width: root.width < 760px ? 70px : 152px; label: root.width < 760px ? (root.spanish ? "Archivos" : "Files") : (root.spanish ? "Abrir descargas" : "Open downloads"); description: "Open download folder: " + root.download-location; clicked => { root.open-download-folder(); } }
+                Action { width: root.width < 760px ? 40px : 84px; label: root.width < 760px ? (root.light ? "☾" : "☀") : (root.light ? "☾ Dark" : "☀ Light"); description: "Switch theme"; clicked => { root.light = !root.light; } }
+                Action { width: root.width < 760px ? 38px : 100px; label: root.width < 760px ? "⚙" : "Settings"; description: "Settings"; clicked => { root.page = 3; } }
+                Action { width: root.width < 760px ? 36px : 44px; label: root.spanish ? "EN" : "ES"; clicked => { root.spanish = !root.spanish; } }
             }
         }
-        Rectangle {
+        GlassBox {
             height: root.queue-open ? 96px + min(root.queue-count, 6) * 25px : 49px;
-            background: Theme.light ? #fff8fc : #0b0e10;
-            border-radius: 5px; border-width: 1px; border-color: #70818b70;
+            background: Theme.panel;
+            border-radius: 9px;
             Text { x: 16px; y: 10px; width: parent.width - 150px; text: "↓   " + root.queue-summary; color: Theme.muted; font-size: 11px; overflow: elide; }
-            Text { x: 32px; y: 28px; width: parent.width - 150px; text: root.transfer-label; color: Theme.muted; font-size: 10px; overflow: elide; }
+            Text { x: 32px; y: 28px; width: parent.width - 172px; text: root.transfer-label; color: Theme.muted; font-size: 10px; overflow: elide; }
             Action { x: parent.width - 130px; y: 8px; width: 120px; label: root.completed + " / " + root.queue-count + "   ⌄"; clicked => { root.queue-open = !root.queue-open; } }
             Rectangle { x: root.progress < 0 ? root.pulse * (parent.width - self.width) : 0px; y: 46px; height: 3px; width: root.progress < 0 ? parent.width * 0.2 : parent.width * root.progress / 100; background: Theme.accent; }
-            if root.queue-open: ScrollView {
+            if root.queue-open: queue-scroll := ScrollView {
                 x: 18px; y: 88px; width: parent.width - 36px; height: min(root.queue-count, 6) * 25px;
-                VerticalLayout { for title[index] in root.queue-titles: Text { text: (index + 1) + ".  " + title; color: Theme.text; font-size: 11px; height: 25px; overflow: elide; } }
+                content-width: self.visible-width;
+                content-height: root.queue-titles.length * 25px;
+                property <int> first-row: max(0,floor(-self.content-y / 25px) - 1);
+                property <int> row-count: max(0,min(root.queue-titles.length - self.first-row,ceil(self.visible-height / 25px) + 3));
+                for slot in queue-scroll.row-count: Text {
+                    property <int> row-index: queue-scroll.first-row + slot;
+                    x: 0px; y: self.row-index * 25px; width: queue-scroll.visible-width; height: 25px;
+                    text: (self.row-index + 1) + ".  " + root.queue-titles[self.row-index];
+                    color: Theme.text; font-size: 11px; overflow: elide;
+                }
             }
             if root.queue-open: HorizontalLayout {
                 x: 18px; y: 50px; width: min(500px, parent.width - 36px); height: 30px; spacing: 10px;
@@ -284,89 +376,111 @@ export component AppWindow inherits Window {
                 width: parent.width; height: parent.height;
                 content-width: self.visible-width;
                 content-height: content.height;
+                content-y <=> root.scroll-y;
+                changed content-height => { root.document-height = self.content-height; }
+                changed visible-height => { root.viewport-height = self.visible-height; }
+                property <int> first-card: min(root.maps.length, max(0, floor((-self.content-y - controls.height) / 184px) - 1) * root.columns);
+                property <int> window-count: min(root.maps.length - self.first-card, (ceil(self.visible-height / 184px) + 3) * root.columns);
+                changed window-count => { root.rendered-card-count = self.window-count; }
                 content := Rectangle {
                     x: 0px; y: 0px; width: scroll.visible-width;
-                    height: root.maps.length == 0 ? 650px : controls.height + ceil(root.maps.length / root.columns) * 174px + 20px;
+                    height: controls.height + max(1,ceil(root.maps.length / root.columns)) * 184px + 24px;
                     controls := Rectangle {
                         x: 0px; y: 0px;
                         width: parent.width;
-                        height: 570px + (root.source-open ? 70px : 0px) + (root.more ? (root.width < 760px ? 390px : 170px) : 0px);
-                        Image { x: 0px; source: root.ambience; y: 120px; width: parent.width; height: 300px; image-fit: cover; opacity: 0.12; }
-                        VerticalLayout {
-                            x: 0px; y: 0px; width: parent.width; height: parent.height;
-                            padding: root.width < 760px ? 16px : 28px; spacing: 12px;
+                        height: controls-layout.preferred-height;
+                        // Do not submit off-screen rounded controls at document
+                        // coordinates outside the software renderer's i16 clip range.
+                        visible: scroll.content-y + self.height > -200px;
+                        Image { x: 0px; source: root.ambience; y: 0px; width: parent.width; height: parent.height; image-fit: cover; opacity: Theme.light ? 0.025 : 0.06; }
+                        Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: @linear-gradient(180deg, transparent, Theme.panel); }
+                        controls-layout := VerticalLayout {
+                            x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
+                            padding: root.width < 760px ? 18px : 24px; spacing: 12px;
                             HorizontalLayout { height: 48px; spacing: 16px;
                                 Image { source: @image-url("../../public/panama-accuracy-flag.png"); width: 42px; height: 42px; image-fit: contain; }
                                 Text { text: root.spanish ? "listado de mapas" : "beatmap listing"; color: Theme.text; font-family: "Outfit"; font-size: 27px; font-weight: 650; vertical-alignment: center; }
                             }
-                            Action { height: 24px; label: root.page == 0 ? "Collection URL or ID  ⌄" : "Beatmap IDs or osu! links  ⌄"; clicked => { root.source-open = !root.source-open; } }
-                            if root.source-open: VerticalLayout { spacing: 4px;
-                                HorizontalLayout { height: 34px; spacing: 10px;
-                                    LineEdit { text <=> root.source-input; placeholder-text: root.page == 0 ? "https://osucollector.com/collections/…" : "IDs or osu! links, separated by spaces"; }
-                                    Action { width: 100px; label: root.busy ? "Loading…" : "Preview →"; enabled: !root.busy; primary: true; clicked => { root.load-source(root.page,root.source-input,root.number-is-set); } }
+                            Action { height: 34px; align-left: true; label: root.page == 0 ? "Collection URL or ID  ⌄" : "Beatmap IDs or osu! links  ⌄"; clicked => { root.source-open = !root.source-open; } }
+                            if root.source-open: VerticalLayout { spacing: 10px;
+                                HorizontalLayout { height: 44px; spacing: 12px;
+                                    GlassInput { text <=> root.source-input; placeholder: root.page == 0 ? "https://osucollector.com/collections/…" : "IDs or osu! links, separated by spaces"; }
+                                    Action { width: 110px; height: 44px; label: root.busy ? "Loading…" : "Preview →"; enabled: !root.busy; primary: true; clicked => { root.load-source(root.page,root.source-input,root.number-is-set); } }
                                 }
-                                if root.page == 1: Action { height: 22px; label: root.number-is-set ? "Plain numbers: beatmapset IDs" : "Plain numbers: difficulty IDs"; clicked => { root.number-is-set = !root.number-is-set; } }
+                                if root.page == 1: Action { height: 34px; label: root.number-is-set ? "Plain numbers: beatmapset IDs" : "Plain numbers: difficulty IDs"; clicked => { root.number-is-set = !root.number-is-set; } }
                             }
                             Text { text: root.collection-name; color: Theme.muted; font-size: 11px; height: 22px; overflow: elide; }
-                            Rectangle {
-                                height: 60px; background: Theme.raised; border-width: 1px; border-color: #79909a55;
-                                HorizontalLayout { padding: 12px; spacing: 14px;
-                                    Text { text: "⌕"; color: Theme.muted; font-size: 28px; width: 26px; }
-                                    TextInput { text <=> root.search; color: Theme.text; font-size: root.width < 760px ? 14px : 21px; single-line: true; vertical-alignment: center; }
+                            GlassInput { height: 56px; text <=> root.search; text-size: root.width < 760px ? 15px : 21px; placeholder: root.spanish ? "Buscar canciones, artistas..." : "Search songs, artists, difficulties..."; }
+                            Rectangle { height: root.width < 760px ? 84px : 40px;
+                                Text { x: 0px; y: 0px; width: root.label-width; height: 40px; text: "General"; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                                Action { x: root.label-width; y: 0px; width: root.width < 760px ? parent.width - root.label-width : 154px; height: 38px; label: "Exclude converted"; active: root.exclude-converted; clicked => { root.exclude-converted = !root.exclude-converted; } }
+                                Action { x: root.width < 760px ? root.label-width : root.label-width + 166px; y: root.width < 760px ? 46px : 0px; width: root.width < 760px ? parent.width - root.label-width : 142px; height: 38px; label: "Featured Artists"; active: root.featured; clicked => { root.featured = !root.featured; } }
+                            }
+                            Rectangle { height: root.width < 760px ? 84px : 40px;
+                                Text { x: 0px; y: 0px; width: root.label-width; height: 40px; text: "Mode"; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                                for name[index] in ["Any", "osu!", "taiko", "catch", "mania"]: Action {
+                                    x: root.label-width + (root.width < 760px ? mod(index,3) * (parent.width - root.label-width + 8px) / 3 : index * 72px);
+                                    y: root.width < 760px ? floor(index/3) * 46px : 0px;
+                                    width: root.width < 760px ? (parent.width - root.label-width - 16px) / 3 : 64px; height: 38px;
+                                    label: name; active: root.mode-index == index; clicked => { root.mode-index = index; }
                                 }
-                                if root.search == "": Text { x: 52px; y: 0px; width: parent.width - 65px; height: parent.height; text: root.spanish ? "Buscar canciones, artistas..." : "Search songs, artists, difficulties..."; color: Theme.muted; font-size: root.width < 760px ? 14px : 21px; vertical-alignment: center; overflow: elide; }
                             }
-                            HorizontalLayout { height: 26px; alignment: start; Text { text: "General"; color: Theme.text; width: 100px; font-size: 13px; }
-                                Action { width: 145px; label: "Exclude converted"; active: root.exclude-converted; clicked => { root.exclude-converted = !root.exclude-converted; } }
-                                Action { width: 125px; label: "Featured Artists"; active: root.featured; clicked => { root.featured = !root.featured; } }
-                            }
-                            HorizontalLayout { height: 26px; alignment: start; Text { text: "Mode"; color: Theme.text; width: 100px; font-size: 13px; }
-                                for name[index] in ["Any", "osu!", "taiko", "catch", "mania"]: Action { width: 48px; label: name; active: root.mode-index == index; clicked => { root.mode-index = index; } }
-                            }
-                            HorizontalLayout { height: 26px; alignment: start; Text { text: "Categories"; color: Theme.text; width: 100px; font-size: 13px; }
-                                Action { width: 130px; label: ["Any", "Ranked", "Approved", "Qualified", "Loved", "Pending", "WIP", "Graveyard"][root.status-index] + "  →"; clicked => { root.status-index = mod(root.status-index + 1, 8); } }
+                            HorizontalLayout { height: 40px; alignment: start; Text { text: "Categories"; color: Theme.text; width: root.label-width; font-size: 13px; vertical-alignment: center; }
+                                Action { width: 170px; height: 38px; align-left: true; label: ["Any", "Ranked", "Approved", "Qualified", "Loved", "Pending", "WIP", "Graveyard"][root.status-index] + "  →"; clicked => { root.status-index = mod(root.status-index + 1, 8); } }
                             }
                             HorizontalLayout {
-                                height: 54px; spacing: 10px;
-                                Text { text: "★"; color: Theme.text; width: 100px; vertical-alignment: center; }
-                                DualRange { label: "Stars"; lower <=> root.star-min; upper <=> root.star-max; limit: 10; spectrum: @linear-gradient(90deg, #4290fb 0%, #4fffd5 20%, #f6f05c 33%, #ff4e6f 49%, #6563de 67%, #000000 90%); }
+                                height: 50px; spacing: 0px;
+                                Text { text: "★ Stars"; color: Theme.text; width: root.label-width; vertical-alignment: center; }
+                                DualRange { primary: true; label: "Stars"; lower <=> root.star-min; upper <=> root.star-max; limit: 10; }
                             }
                             Action { label: root.more ? "⌃  Less filters" : "⌄  More filters"; clicked => { root.more = !root.more; } }
-                            if root.more: Rectangle { height: root.width < 760px ? 380px : 160px;
+                            if root.more: GlassBox {
+                                property <int> range-columns: root.width >= 1100px ? 3 : root.width >= 760px ? 2 : 1;
+                                height: ceil(root.ranges.length / self.range-columns) * 86px + 72px;
                                 for range[index] in root.ranges: DualRange {
-                                    x: root.width < 760px ? 0px : mod(index, 3) * parent.width / 3;
-                                    y: root.width < 760px ? index * 55px : floor(index / 3) * 55px;
-                                    width: root.width < 760px ? parent.width : parent.width / 3 - 14px;
-                                    label: range.label; lower: range.lower; upper: range.upper; limit: range.limit;
+                                    x: 18px + mod(index,parent.range-columns) * (parent.width - 24px) / parent.range-columns;
+                                    y: 16px + floor(index / parent.range-columns) * 86px;
+                                    width: (parent.width - 36px - (parent.range-columns - 1) * 12px) / parent.range-columns;
+                                    label: range.label; kind: range.key; lower: range.lower; upper: range.upper; limit: range.limit;
                                     edited(lower,upper) => { root.range-edited(range.key,lower,upper); }
                                 }
-                                Action { y: root.width < 760px ? 335px : 115px; height: 28px; width: parent.width;
+                                Action { x: 18px; y: parent.height - 50px; height: 34px; width: parent.width - 36px;
                                     label: root.include-unknown ? "Include unknown stats: ON" : "Include unknown stats: OFF";
                                     clicked => { root.include-unknown = !root.include-unknown; }
                                 }
                             }
-                            HorizontalLayout { height: 34px; Text { text: root.maps.length + " sets"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
-                                Action { width: 150px; label: "Sort: " + ["Preview order", "Title", "Artist", "Difficulty"][root.sort-index]; clicked => { root.sort-index = mod(root.sort-index + 1,4); } }
-                                Action { width: 66px; label: root.list-view ? "▦ Grid" : "☷ List"; clicked => { root.list-view = !root.list-view; } }
+                            HorizontalLayout { height: 40px; spacing: 10px; Text { text: root.maps.length + " sets"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                                Action { width: root.width < 760px ? 146px : 172px; label: "Sort: " + ["Preview order", "Title", "Artist", "Difficulty"][root.sort-index]; clicked => { root.sort-index = mod(root.sort-index + 1,4); } }
+                                Action { width: 76px; label: root.list-view ? "▦ Grid" : "☷ List"; clicked => { root.list-view = !root.list-view; } }
                             }
-                            Action { height: 26px; label: "Download all sets · ignores filters"; enabled: root.live && root.recovery-count == 0; clicked => { root.enqueue-all(); } }
-                            HorizontalLayout { height: 34px; spacing: 12px;
-                                Action { width: 90px; label: "Select visible"; clicked => { root.select-visible(); } }
-                                Action { width: 40px; label: "Clear"; clicked => { root.clear-selection(); } }
-                                Text { text: root.selected-count + " selected"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
-                                Action { width: 145px; label: "↓  Queue selected"; primary: true; enabled: root.selected-count > 0 && root.live && root.recovery-count == 0; clicked => { root.enqueue-selected(); } }
+                            Action { height: 36px; label: "Download all sets · ignores filters"; enabled: root.live && root.recovery-count == 0; clicked => { root.enqueue-all(); } }
+                            Rectangle { height: root.width < 760px ? 88px : 40px;
+                                HorizontalLayout { x: 0px; y: 0px; width: 180px; height: 40px; spacing: 10px;
+                                    Action { width: 106px; label: "Select visible"; clicked => { root.select-visible(); } }
+                                    Action { width: 64px; label: "Clear"; clicked => { root.clear-selection(); } }
+                                }
+                                Text { x: 190px; y: 0px; width: max(0px,parent.width - 190px - (root.width < 760px ? 0px : 186px)); height: 40px; text: root.selected-count + " selected"; color: Theme.muted; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; }
+                                Action { x: root.width < 760px ? 0px : parent.width - 172px; y: root.width < 760px ? 48px : 0px; width: root.width < 760px ? parent.width : 172px; height: 40px; label: "↓  Queue selected"; primary: true; enabled: root.selected-count > 0 && root.live && root.recovery-count == 0; clicked => { root.enqueue-selected(); } }
                             }
                         }
                     }
-                    for map[index] in root.maps: Card {
-                        x: 18px + mod(index, root.columns) * ((content.width - 36px + 16px) / root.columns);
-                        y: controls.height + floor(index / root.columns) * 174px;
+                    // A bounded viewport window: thousands of maps do not create
+                    // thousands of image/text/button trees just to scroll them.
+                    for slot in scroll.window-count: Card {
+                        property <int> map-index: scroll.first-card + slot;
+                        x: 18px + mod(self.map-index, root.columns) * ((content.width - 36px + 16px) / root.columns);
+                        y: controls.height + floor(self.map-index / root.columns) * 184px;
                         width: (content.width - 36px - (root.columns - 1) * 16px) / root.columns;
-                        map: map;
+                        map: root.maps[self.map-index];
                         select(id) => { root.toggle-map(id); }
                         enqueue(id) => { root.enqueue-map(id); }
                         open-map(id) => { root.open-map(id); }
                         inspect(id) => { root.inspect-map(id); }
+                    }
+                    if root.maps.length == 0: Text {
+                        x: 24px; y: controls.height + 32px; width: parent.width - 48px; height: 64px;
+                        text: root.busy ? "Loading public metadata…" : "No maps to show. Load a preview or adjust your filters.";
+                        color: Theme.muted; font-size: 14px; wrap: word-wrap;
                     }
                 }
             }
@@ -374,12 +488,12 @@ export component AppWindow inherits Window {
         if root.page >= 2: Rectangle {
             vertical-stretch: 1; background: Theme.panel; border-radius: 8px;
             VerticalLayout { padding: 30px; spacing: 18px;
-                Text { text: root.page == 2 ? "Collections · migration pending" : "Settings · experimental profile"; color: Theme.text; font-size: 25px; }
+                Text { text: root.page == 2 ? "Collections · migration pending" : "Settings · experimental profile"; color: Theme.text; font-size: root.width < 760px ? 21px : 25px; wrap: word-wrap; }
                 Text { text: "This native prototype never scans or modifies your osu! library.\nExisting Electron settings and downloads are not opened."; color: Theme.muted; wrap: word-wrap; font-size: 14px; }
                 Action { label: root.light ? "Switch to Dark" : "Switch to Light"; clicked => { root.light = !root.light; } }
                 if root.page == 3: VerticalLayout { spacing: 12px;
                     Text { text: "Download folder (absolute path)"; color: Theme.muted; }
-                    LineEdit { text <=> root.directory; }
+                    GlassInput { text <=> root.directory; placeholder: "Absolute download folder"; }
                     Action { label: root.catboy ? "Mirror: catboy.best" : "Mirror: osu.direct"; clicked => { root.catboy = !root.catboy; } }
                     Action { label: "Save download settings"; primary: true; clicked => { root.settings-save(root.directory,root.catboy); } }
                 }
