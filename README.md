@@ -1,4 +1,9 @@
 <h1 align="center">PACC-BD · Your next collection starts here</h1>
+
+> **`rust-rewrite` experimental branch:** the native Rust/Slint app is
+> in [`native/`](native/README.md). Stable Electron development remains on `main`.
+> It supports real Collector/ID previews and `.osz` downloads with isolated data.
+> Native osu! collection editing is not enabled yet.
 <p align="center">Panama Accuracy Collector &amp; Beatmap Downloader</p>
 
 ![PACC-BD — current Dark theme interface](docs/images/app-preview.png)

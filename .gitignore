@@ -5,3 +5,5 @@ release/
 .pacc-bd/
 .panama-maps/
 *.part
+native/target/
+native/demo-covers/

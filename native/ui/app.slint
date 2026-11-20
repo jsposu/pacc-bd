@@ -1,0 +1,419 @@
+import { ScrollView, AboutSlint, LineEdit } from "std-widgets.slint";
+
+export struct MapCard {
+    id: int,
+    title: string,
+    artist: string,
+    mapper: string,
+    stars: float,
+    cover: image,
+    glow: image,
+    selected: bool,
+    status: string,
+    summary: string,
+    downloadable: bool,
+    mode: string,
+    ratings: [float],
+}
+
+export struct FilterRange { label: string, key: int, lower: float, upper: float, limit: float }
+
+component DualRange inherits Rectangle {
+    in property <string> label;
+    in property <float> limit: 10;
+    in-out property <float> lower: 0;
+    in-out property <float> upper: 10;
+    callback edited(float, float);
+    in property <brush> spectrum: root.label == "BPM" ? @linear-gradient(90deg, #58a6ff, #ef6575) : @linear-gradient(90deg, #6966ad, #b49fdd);
+    property <bool> moving-upper: false;
+    property <float> step: root.limit > 20 ? 1 : 0.1;
+    height: 54px;
+    function update(value: float) {
+        if root.moving-upper { root.upper = max(root.lower, min(root.limit, round(value / root.step) * root.step)); }
+        else { root.lower = min(root.upper, max(0, round(value / root.step) * root.step)); }
+        root.edited(root.lower, root.upper);
+    }
+    Text { x: 0px; y: 0px; width: parent.width; height: 17px; text: root.label + "   " + round(root.lower * 10) / 10 + " – " + (root.upper >= root.limit ? "∞" : round(root.upper * 10) / 10); font-size: 10px; color: Theme.muted; }
+    Rectangle { x: 0px; y: 22px; width: parent.width; height: 26px; border-radius: 4px; background: root.spectrum; border-width: 1px; border-color: #79909a88;
+        Rectangle { x: root.lower / root.limit * (parent.width - 28px); y: 0px; width: 28px; height: 26px; background: #3296ed; border-radius: 3px;
+            Text { text: round(root.lower * 10) / 10; color: #102030; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Rectangle { x: root.upper / root.limit * (parent.width - 28px); y: 0px; width: 28px; height: 26px; background: #20252d; border-radius: 3px;
+            Text { text: root.upper >= root.limit ? "∞" : round(root.upper * 10) / 10; color: #ffffff; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    lower-focus := FocusScope { x: 0px; width: 0px;
+        key-pressed(event) => {
+            root.moving-upper = false;
+            if event.text == Key.RightArrow || event.text == Key.UpArrow { root.update(root.lower + root.step); return accept; }
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow { root.update(root.lower - root.step); return accept; }
+            if event.text == Key.Home { root.update(0); return accept; }
+            if event.text == Key.End { root.update(root.upper); return accept; }
+            return reject;
+        }
+    }
+    upper-focus := FocusScope { x: 0px; width: 0px;
+        key-pressed(event) => {
+            root.moving-upper = true;
+            if event.text == Key.RightArrow || event.text == Key.UpArrow { root.update(root.upper + root.step); return accept; }
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow { root.update(root.upper - root.step); return accept; }
+            if event.text == Key.Home { root.update(root.lower); return accept; }
+            if event.text == Key.End { root.update(root.limit); return accept; }
+            return reject;
+        }
+    }
+    drag := TouchArea { x: 0px; y: 18px; width: parent.width; height: 36px; mouse-cursor: ew-resize;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                let value = max(0, min(root.limit, (self.mouse-x - 14px) / (self.width - 28px) * root.limit));
+                root.moving-upper = (value - root.lower) * (value - root.lower) > (value - root.upper) * (value - root.upper);
+                if root.moving-upper { upper-focus.focus(); } else { lower-focus.focus(); }
+                root.update(value);
+            }
+        }
+        moved => { if self.pressed { root.update((self.mouse-x - 14px) / (self.width - 28px) * root.limit); } }
+    }
+}
+
+global Theme {
+    in-out property <bool> light: false;
+    out property <color> bg: light ? #f1eaf0 : #000000;
+    out property <color> panel: light ? #e8e3ea : #1d262b;
+    out property <color> raised: light ? #fff9fc : #28383e;
+    out property <color> text: light ? #342b3a : #f7fafb;
+    out property <color> muted: light ? #4f6677 : #bdd9e2;
+    out property <color> accent: light ? #a82e69 : #fa7eb5;
+}
+
+component Action inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-width: 30px;
+    height: 34px;
+    border-radius: 4px;
+    background: primary ? Theme.accent : touch.has-hover ? Theme.raised : transparent;
+    border-width: active ? 1px : 0px;
+    border-color: Theme.accent;
+    animate background { duration: 150ms; }
+    Text { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.label; color: root.primary ? #231523 : Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+    opacity: enabled ? 1 : 0.45;
+    focus := FocusScope { x: 0px; width: 0px; enabled: root.enabled;
+        key-pressed(event) => { if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; } return reject; }
+    }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    accessible-role: button;
+    accessible-label: label;
+}
+
+component Card inherits Rectangle {
+    in property <MapCard> map;
+    callback select(int);
+    callback enqueue(int);
+    callback open-map(int);
+    callback inspect(int);
+    height: 158px;
+    border-radius: 10px;
+    clip: true;
+    background: Theme.panel;
+    border-width: map.selected ? 2px : 0px;
+    border-color: Theme.accent;
+    Image { x: 0px; y: 0px; source: root.map.cover; width: parent.width; height: parent.height; image-fit: cover; }
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: Theme.light ? @linear-gradient(90deg, #e8e3ea00 0%, #e8e3eaef 27%, #e8e3ead0 70%, #e8e3ea80 100%) : @linear-gradient(90deg, #1d262b00 0%, #1d262bef 27%, #1d262bd0 70%, #1d262b80 100%); }
+    Rectangle {
+        x: 10px; y: 10px; width: 21px; height: 21px; border-radius: 11px;
+        border-width: 2px; border-color: #ffffffb0;
+        background: root.map.selected ? Theme.accent : #00000060;
+        TouchArea { mouse-cursor: pointer; clicked => { root.select(root.map.id); } }
+    }
+    VerticalLayout {
+        x: 90px; y: 10px; width: parent.width - 126px; height: parent.height - 20px;
+        spacing: 4px;
+        Text { text: root.map.title; color: Theme.text; font-family: "Outfit"; font-size: 19px; font-weight: 750; overflow: elide; }
+        Text { text: "by " + root.map.artist; color: Theme.text; font-size: 13px; font-weight: 600; overflow: elide; }
+        Text { text: "mapped by " + root.map.mapper; color: Theme.muted; font-size: 10px; overflow: elide; }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        HorizontalLayout {
+            height: 21px; spacing: 8px;
+            Rectangle { width: 54px; height: 18px; border-radius: 9px; background: root.map.status == "RANKED" || root.map.status == "APPROVED" ? #b2ef6b : root.map.status == "LOVED" ? #f6a4ce : #b4c4d0;
+                Text { text: root.map.status; font-size: 8px; font-weight: 700; color: #1c3420; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+            }
+            Text { text: root.map.mode == "osu" ? "◉" : root.map.mode == "taiko" ? "◎" : root.map.mode == "fruits" ? "◒" : root.map.mode == "mania" ? "▥" : "⋯"; color: Theme.text; font-size: 15px; }
+            for stars in root.map.ratings: Rectangle { width: 7px; height: 15px; border-radius: 4px; background: stars < 0 ? #a7adb7 : stars < 2 ? #4fc0ff : stars < 4 ? #f6f05c : stars < 6 ? #ff4e6f : #6563de; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        Action { height: 22px; label: root.map.summary; clicked => { root.inspect(root.map.id); } }
+    }
+    TouchArea { x: 0px; y: 40px; width: 80px; height: parent.height - 40px; mouse-cursor: pointer; clicked => { root.open-map(root.map.id); } }
+    TouchArea { x: 90px; y: 8px; width: parent.width - 126px; height: 24px; mouse-cursor: pointer; clicked => { root.open-map(root.map.id); } }
+    Action { x: parent.width - 34px; y: 54px; width: 32px; height: 46px; label: "↓"; enabled: root.map.downloadable; clicked => { root.enqueue(root.map.id); } }
+}
+
+export component AppWindow inherits Window {
+    title: "PACC-BD · Rust experimental";
+    icon: @image-url("../../public/panama-accuracy-flag.png");
+    preferred-width: 1440px;
+    preferred-height: 980px;
+    min-width: 390px;
+    min-height: 640px;
+    background: Theme.bg;
+    default-font-family: "DM Sans";
+    in property <[MapCard]> maps;
+    in property <image> ambience;
+    in property <image> triangles;
+    in property <int> selected-count;
+    in property <int> queue-count;
+    in property <int> recovery-count;
+    in property <int> completed;
+    in property <string> queue-summary: "READY · Download queue";
+    in property <float> progress: 0;
+    in property <float> pulse: 0;
+    in property <string> transfer-label;
+    in property <bool> paused;
+    in property <bool> busy;
+    in property <bool> live;
+    in property <string> collection-name;
+    in property <[FilterRange]> ranges;
+    in-out property <bool> source-open: true;
+    in-out property <string> source-input;
+    in-out property <bool> number-is-set: false;
+    in-out property <string> directory;
+    in-out property <bool> catboy: false;
+    in-out property <string> info-text;
+    in-out property <int> mode-index: 0;
+    in-out property <int> status-index: 0;
+    in-out property <int> sort-index: 0;
+    in-out property <bool> exclude-converted: false;
+    in-out property <bool> featured: false;
+    in-out property <bool> include-unknown: false;
+    in property <[string]> queue-titles;
+    in-out property <string> search;
+    in-out property <bool> light: false;
+    in-out property <bool> more: false;
+    in-out property <bool> queue-open: false;
+    in-out property <bool> list-view: false;
+    in-out property <bool> spanish: false;
+    in-out property <int> page: 0;
+    in-out property <float> star-min: 0;
+    in-out property <float> star-max: 10;
+    in property <string> notice: "Experimental Rust · .osz files are never imported automatically";
+    callback search-changed;
+    callback toggle-map(int);
+    callback enqueue-map(int);
+    callback enqueue-selected;
+    callback enqueue-all;
+    callback select-visible;
+    callback clear-selection;
+    callback recovery-choice(bool);
+    callback theme-changed;
+    callback load-source(int, string, bool);
+    callback queue-action(string);
+    callback settings-save(string, bool);
+    callback open-map(int);
+    callback inspect-map(int);
+    callback range-edited(int, float, float);
+    callback page-changed;
+    callback advanced-toggled;
+    changed light => { Theme.light = root.light; root.theme-changed(); }
+    changed spanish => { root.theme-changed(); }
+    changed search => { root.search-changed(); }
+    changed star-min => { root.search-changed(); }
+    changed star-max => { root.search-changed(); }
+    changed page => { root.page-changed(); }
+    changed more => { root.advanced-toggled(); }
+    changed mode-index => { root.search-changed(); }
+    changed status-index => { root.search-changed(); }
+    changed sort-index => { root.search-changed(); }
+    changed exclude-converted => { root.search-changed(); }
+    changed featured => { root.search-changed(); }
+    changed include-unknown => { root.search-changed(); }
+    out property <int> columns: root.list-view ? 1 : root.width >= 1180px ? 3 : root.width >= 760px ? 2 : 1;
+    out property <length> canvas-width: root.width;
+    out property <length> canvas-height: root.height;
+    property <length> margin: root.width < 760px ? 12px : 48px;
+    Image { x: 0px; y: 0px; source: root.ambience; width: parent.width; height: 240px; image-fit: cover; opacity: 0.48; }
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: 250px; background: @linear-gradient(180deg, #00000000 0%, Theme.bg 100%); }
+    Image { x: 0px; y: 0px; source: root.triangles; width: parent.width; height: 120px; image-fit: cover; opacity: 0.3; }
+    VerticalLayout {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        padding-left: root.margin; padding-right: root.margin; padding-top: 12px; padding-bottom: 14px; spacing: 10px;
+        Rectangle {
+            height: root.width < 900px ? 100px : 70px;
+            Text { x: 0px; text: "PACC-BD"; color: Theme.text; font-size: 23px; font-weight: 800; y: 8px; }
+            Text { x: 0px; text: "For Panama Accuracy"; color: Theme.muted; font-size: 10px; y: 38px; }
+            HorizontalLayout {
+                x: root.width < 900px ? 0px : 165px; y: root.width < 900px ? 58px : 8px;
+                width: min(590px, parent.width); height: 34px; spacing: 8px;
+                Action { horizontal-stretch: 2; label: root.width < 760px ? "osu! Collector" : "osu! Collector Downloader"; active: root.page == 0; clicked => { root.page = 0; } }
+                Action { horizontal-stretch: 2; label: root.width < 760px ? "Beatmap ID" : "Download by Beatmap ID"; active: root.page == 1; clicked => { root.page = 1; } }
+                Action { label: root.spanish ? "Colecciones" : "Collections"; active: root.page == 2; clicked => { root.page = 2; } }
+            }
+            HorizontalLayout {
+                x: parent.width - self.width; y: 8px; width: root.width < 760px ? 148px : 260px; height: 34px;
+                Action { label: root.light ? "☾ Dark" : "☀ Light"; clicked => { root.light = !root.light; } }
+                Action { label: "Settings"; clicked => { root.page = 3; } }
+                Action { label: root.spanish ? "EN" : "ES"; clicked => { root.spanish = !root.spanish; } }
+            }
+        }
+        Rectangle {
+            height: root.queue-open ? 96px + min(root.queue-count, 6) * 25px : 49px;
+            background: Theme.light ? #fff8fc : #0b0e10;
+            border-radius: 5px; border-width: 1px; border-color: #70818b70;
+            Text { x: 16px; y: 10px; width: parent.width - 150px; text: "↓   " + root.queue-summary; color: Theme.muted; font-size: 11px; overflow: elide; }
+            Text { x: 32px; y: 28px; width: parent.width - 150px; text: root.transfer-label; color: Theme.muted; font-size: 10px; overflow: elide; }
+            Action { x: parent.width - 130px; y: 8px; width: 120px; label: root.completed + " / " + root.queue-count + "   ⌄"; clicked => { root.queue-open = !root.queue-open; } }
+            Rectangle { x: root.progress < 0 ? root.pulse * (parent.width - self.width) : 0px; y: 46px; height: 3px; width: root.progress < 0 ? parent.width * 0.2 : parent.width * root.progress / 100; background: Theme.accent; }
+            if root.queue-open: ScrollView {
+                x: 18px; y: 88px; width: parent.width - 36px; height: min(root.queue-count, 6) * 25px;
+                VerticalLayout { for title[index] in root.queue-titles: Text { text: (index + 1) + ".  " + title; color: Theme.text; font-size: 11px; height: 25px; overflow: elide; } }
+            }
+            if root.queue-open: HorizontalLayout {
+                x: 18px; y: 50px; width: min(500px, parent.width - 36px); height: 30px; spacing: 10px;
+                Action { label: root.paused ? "Resume" : "Pause"; clicked => { root.queue-action("pause"); } }
+                Action { label: "Cancel"; clicked => { root.queue-action("cancel"); } }
+                Action { label: "Retry failed"; clicked => { root.queue-action("retry"); } }
+                Action { label: "Clear history"; clicked => { root.queue-action("clear"); } }
+            }
+        }
+        if root.page < 2: Rectangle {
+            vertical-stretch: 1; clip: true; border-radius: 8px; background: Theme.panel;
+            scroll := ScrollView {
+                x: 0px; y: 0px;
+                width: parent.width; height: parent.height;
+                content-width: self.visible-width;
+                content-height: content.height;
+                content := Rectangle {
+                    x: 0px; y: 0px; width: scroll.visible-width;
+                    height: root.maps.length == 0 ? 650px : controls.height + ceil(root.maps.length / root.columns) * 174px + 20px;
+                    controls := Rectangle {
+                        x: 0px; y: 0px;
+                        width: parent.width;
+                        height: 570px + (root.source-open ? 70px : 0px) + (root.more ? (root.width < 760px ? 390px : 170px) : 0px);
+                        Image { x: 0px; source: root.ambience; y: 120px; width: parent.width; height: 300px; image-fit: cover; opacity: 0.12; }
+                        VerticalLayout {
+                            x: 0px; y: 0px; width: parent.width; height: parent.height;
+                            padding: root.width < 760px ? 16px : 28px; spacing: 12px;
+                            HorizontalLayout { height: 48px; spacing: 16px;
+                                Image { source: @image-url("../../public/panama-accuracy-flag.png"); width: 42px; height: 42px; image-fit: contain; }
+                                Text { text: root.spanish ? "listado de mapas" : "beatmap listing"; color: Theme.text; font-family: "Outfit"; font-size: 27px; font-weight: 650; vertical-alignment: center; }
+                            }
+                            Action { height: 24px; label: root.page == 0 ? "Collection URL or ID  ⌄" : "Beatmap IDs or osu! links  ⌄"; clicked => { root.source-open = !root.source-open; } }
+                            if root.source-open: VerticalLayout { spacing: 4px;
+                                HorizontalLayout { height: 34px; spacing: 10px;
+                                    LineEdit { text <=> root.source-input; placeholder-text: root.page == 0 ? "https://osucollector.com/collections/…" : "IDs or osu! links, separated by spaces"; }
+                                    Action { width: 100px; label: root.busy ? "Loading…" : "Preview →"; enabled: !root.busy; primary: true; clicked => { root.load-source(root.page,root.source-input,root.number-is-set); } }
+                                }
+                                if root.page == 1: Action { height: 22px; label: root.number-is-set ? "Plain numbers: beatmapset IDs" : "Plain numbers: difficulty IDs"; clicked => { root.number-is-set = !root.number-is-set; } }
+                            }
+                            Text { text: root.collection-name; color: Theme.muted; font-size: 11px; height: 22px; overflow: elide; }
+                            Rectangle {
+                                height: 60px; background: Theme.raised; border-width: 1px; border-color: #79909a55;
+                                HorizontalLayout { padding: 12px; spacing: 14px;
+                                    Text { text: "⌕"; color: Theme.muted; font-size: 28px; width: 26px; }
+                                    TextInput { text <=> root.search; color: Theme.text; font-size: root.width < 760px ? 14px : 21px; single-line: true; vertical-alignment: center; }
+                                }
+                                if root.search == "": Text { x: 52px; y: 0px; width: parent.width - 65px; height: parent.height; text: root.spanish ? "Buscar canciones, artistas..." : "Search songs, artists, difficulties..."; color: Theme.muted; font-size: root.width < 760px ? 14px : 21px; vertical-alignment: center; overflow: elide; }
+                            }
+                            HorizontalLayout { height: 26px; alignment: start; Text { text: "General"; color: Theme.text; width: 100px; font-size: 13px; }
+                                Action { width: 145px; label: "Exclude converted"; active: root.exclude-converted; clicked => { root.exclude-converted = !root.exclude-converted; } }
+                                Action { width: 125px; label: "Featured Artists"; active: root.featured; clicked => { root.featured = !root.featured; } }
+                            }
+                            HorizontalLayout { height: 26px; alignment: start; Text { text: "Mode"; color: Theme.text; width: 100px; font-size: 13px; }
+                                for name[index] in ["Any", "osu!", "taiko", "catch", "mania"]: Action { width: 48px; label: name; active: root.mode-index == index; clicked => { root.mode-index = index; } }
+                            }
+                            HorizontalLayout { height: 26px; alignment: start; Text { text: "Categories"; color: Theme.text; width: 100px; font-size: 13px; }
+                                Action { width: 130px; label: ["Any", "Ranked", "Approved", "Qualified", "Loved", "Pending", "WIP", "Graveyard"][root.status-index] + "  →"; clicked => { root.status-index = mod(root.status-index + 1, 8); } }
+                            }
+                            HorizontalLayout {
+                                height: 54px; spacing: 10px;
+                                Text { text: "★"; color: Theme.text; width: 100px; vertical-alignment: center; }
+                                DualRange { label: "Stars"; lower <=> root.star-min; upper <=> root.star-max; limit: 10; spectrum: @linear-gradient(90deg, #4290fb 0%, #4fffd5 20%, #f6f05c 33%, #ff4e6f 49%, #6563de 67%, #000000 90%); }
+                            }
+                            Action { label: root.more ? "⌃  Less filters" : "⌄  More filters"; clicked => { root.more = !root.more; } }
+                            if root.more: Rectangle { height: root.width < 760px ? 380px : 160px;
+                                for range[index] in root.ranges: DualRange {
+                                    x: root.width < 760px ? 0px : mod(index, 3) * parent.width / 3;
+                                    y: root.width < 760px ? index * 55px : floor(index / 3) * 55px;
+                                    width: root.width < 760px ? parent.width : parent.width / 3 - 14px;
+                                    label: range.label; lower: range.lower; upper: range.upper; limit: range.limit;
+                                    edited(lower,upper) => { root.range-edited(range.key,lower,upper); }
+                                }
+                                Action { y: root.width < 760px ? 335px : 115px; height: 28px; width: parent.width;
+                                    label: root.include-unknown ? "Include unknown stats: ON" : "Include unknown stats: OFF";
+                                    clicked => { root.include-unknown = !root.include-unknown; }
+                                }
+                            }
+                            HorizontalLayout { height: 34px; Text { text: root.maps.length + " sets"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                                Action { width: 150px; label: "Sort: " + ["Preview order", "Title", "Artist", "Difficulty"][root.sort-index]; clicked => { root.sort-index = mod(root.sort-index + 1,4); } }
+                                Action { width: 66px; label: root.list-view ? "▦ Grid" : "☷ List"; clicked => { root.list-view = !root.list-view; } }
+                            }
+                            Action { height: 26px; label: "Download all sets · ignores filters"; enabled: root.live && root.recovery-count == 0; clicked => { root.enqueue-all(); } }
+                            HorizontalLayout { height: 34px; spacing: 12px;
+                                Action { width: 90px; label: "Select visible"; clicked => { root.select-visible(); } }
+                                Action { width: 40px; label: "Clear"; clicked => { root.clear-selection(); } }
+                                Text { text: root.selected-count + " selected"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+                                Action { width: 145px; label: "↓  Queue selected"; primary: true; enabled: root.selected-count > 0 && root.live && root.recovery-count == 0; clicked => { root.enqueue-selected(); } }
+                            }
+                        }
+                    }
+                    for map[index] in root.maps: Card {
+                        x: 18px + mod(index, root.columns) * ((content.width - 36px + 16px) / root.columns);
+                        y: controls.height + floor(index / root.columns) * 174px;
+                        width: (content.width - 36px - (root.columns - 1) * 16px) / root.columns;
+                        map: map;
+                        select(id) => { root.toggle-map(id); }
+                        enqueue(id) => { root.enqueue-map(id); }
+                        open-map(id) => { root.open-map(id); }
+                        inspect(id) => { root.inspect-map(id); }
+                    }
+                }
+            }
+        }
+        if root.page >= 2: Rectangle {
+            vertical-stretch: 1; background: Theme.panel; border-radius: 8px;
+            VerticalLayout { padding: 30px; spacing: 18px;
+                Text { text: root.page == 2 ? "Collections · migration pending" : "Settings · experimental profile"; color: Theme.text; font-size: 25px; }
+                Text { text: "This native prototype never scans or modifies your osu! library.\nExisting Electron settings and downloads are not opened."; color: Theme.muted; wrap: word-wrap; font-size: 14px; }
+                Action { label: root.light ? "Switch to Dark" : "Switch to Light"; clicked => { root.light = !root.light; } }
+                if root.page == 3: VerticalLayout { spacing: 12px;
+                    Text { text: "Download folder (absolute path)"; color: Theme.muted; }
+                    LineEdit { text <=> root.directory; }
+                    Action { label: root.catboy ? "Mirror: catboy.best" : "Mirror: osu.direct"; clicked => { root.catboy = !root.catboy; } }
+                    Action { label: "Save download settings"; primary: true; clicked => { root.settings-save(root.directory,root.catboy); } }
+                }
+                AboutSlint { }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+        Text { text: root.notice; color: Theme.muted; font-size: 10px; wrap: word-wrap; }
+    }
+    if root.recovery-count > 0: Rectangle {
+        width: parent.width; height: parent.height; background: #000000c0;
+        TouchArea { }
+        Rectangle {
+            width: min(470px, parent.width - 32px); height: 220px;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            background: Theme.panel; border-radius: 10px; border-width: 1px; border-color: Theme.accent;
+            VerticalLayout { padding: 24px; spacing: 16px;
+                Text { text: "¿Recuperar la cola anterior?"; color: Theme.text; font-size: 21px; font-weight: 700; }
+                Text { text: root.recovery-count + " mapas pendientes de la sesión anterior.\nNo se ha iniciado ninguna descarga.\nRecuperar inicia la cola. Descartar no borra archivos completados."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                HorizontalLayout { spacing: 16px;
+                    Action { label: "Descartar"; clicked => { root.recovery-choice(false); } }
+                    Action { label: "Recuperar"; primary: true; clicked => { root.recovery-choice(true); } }
+                }
+            }
+        }
+    }
+    if root.info-text != "": Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height; background: #000000b0;
+        TouchArea { }
+        Rectangle { width: min(650px,parent.width - 32px); height: min(500px,parent.height - 80px); x: (parent.width - self.width)/2; y: (parent.height - self.height)/2; background: Theme.panel; border-radius: 8px;
+            VerticalLayout { padding: 24px; spacing: 12px;
+                details := ScrollView { content-width: self.visible-width; Text { x: 0px; y: 0px; width: details.visible-width; text: root.info-text; color: Theme.text; font-size: 13px; wrap: word-wrap; } }
+                Action { height: 34px; label: "Close"; primary: true; clicked => { root.info-text = ""; } }
+            }
+        }
+    }
+}
