@@ -1,8 +1,8 @@
 use crate::{AppWindow, FilterRange, MapCard, UiPalette, visuals};
 use pacc_bd_native::{
     desktop, download,
-    model::{BeatmapSet, Difficulty, Download, Filters, Mirror, Range, Status, Store},
-    network,
+    model::{BeatmapSet, Difficulty, Download, Filters, Mirror, Range, Status, Store, Theme},
+    network, profile,
 };
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{
@@ -28,6 +28,11 @@ enum Event {
     Message(u64, String),
     Finished(u64, network::Result<PathBuf>),
     FolderOpened(network::Result<()>),
+}
+
+fn set_notice(ui: &AppWindow, message: impl Into<slint::SharedString>, error: bool) {
+    ui.set_notice(message.into());
+    ui.set_notice_error(error);
 }
 struct Running {
     id: u64,
@@ -83,7 +88,11 @@ impl State {
         if let Err(error) = snapshot.save(&self.profile) {
             eprintln!("Cannot save native state: {error}");
             self.paused = true;
-            ui.set_notice(format!("Cannot save native state; queue paused: {error}").into());
+            set_notice(
+                ui,
+                format!("Cannot save native state; queue paused: {error}"),
+                true,
+            );
             false
         } else {
             true
@@ -323,11 +332,19 @@ impl State {
     }
     fn enqueue(&mut self, ui: &AppWindow, ids: Vec<u64>) {
         if self.demo {
-            ui.set_notice("Load real maps first; fixtures cannot be downloaded".into());
+            set_notice(
+                ui,
+                "Load real maps first; fixtures cannot be downloaded",
+                true,
+            );
             return;
         }
         if !self.recovery.is_empty() {
-            ui.set_notice("Choose Recover or Discard before adding downloads".into());
+            set_notice(
+                ui,
+                "Choose Recover or Discard before adding downloads",
+                true,
+            );
             return;
         }
         let wanted: HashSet<_> = ids.into_iter().collect();
@@ -454,10 +471,14 @@ fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
                         format!("Some IDs failed: {}", errors.join("; "))
                     };
                     if saved {
-                        ui.set_notice(format!("Loaded {count} sets. {note}").into());
+                        set_notice(
+                            ui,
+                            format!("Loaded {count} sets. {note}"),
+                            !errors.is_empty(),
+                        );
                     }
                 }
-                Err(error) => ui.set_notice(error.into()),
+                Err(error) => set_notice(ui, error, true),
             }
         }
         Event::Cover(id, cover) => {
@@ -473,8 +494,8 @@ fn handle_event(state: &mut State, ui: &AppWindow, event: Event) {
             }
         }
         Event::FolderOpened(result) => match result {
-            Ok(()) => ui.set_notice("Opened the configured download folder.".into()),
-            Err(error) => ui.set_notice(format!("Cannot open download folder: {error}").into()),
+            Ok(()) => set_notice(ui, "Opened the configured download folder.", false),
+            Err(error) => set_notice(ui, format!("Cannot open download folder: {error}"), true),
         },
         Event::Progress(id, bytes, total) => {
             if let Some(item) = state
@@ -661,10 +682,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             args.get(index + 1)
                 .ok_or("--data-dir requires a directory")?,
         )?,
-        None => directories::ProjectDirs::from("io", "jsposu", "pacc-bd-rust-preview")
-            .ok_or("No experimental data directory available")?
-            .data_local_dir()
-            .to_path_buf(),
+        None => profile::default_data_dir()?,
     };
     fs::create_dir_all(&directory)?;
     let lock = File::options()
@@ -674,7 +692,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .write(true)
         .open(directory.join("native.lock"))?;
     fs2::FileExt::try_lock_exclusive(&lock)
-        .map_err(|_| "Another native app is using this experimental profile")?;
+        .map_err(|_| "Another PACC-BD instance is using this profile")?;
     let fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("demo-covers");
     for name in ["DM-Sans.ttf", "Outfit.ttf"] {
         let file = fonts.join(name);
@@ -745,7 +763,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         next_start: Instant::now(),
     };
     println!(
-        "PACC-BD Rust experimental\nProfile: {}\nDownloads: {}",
+        "PACC-BD native\nProfile: {}\nDownloads: {}",
         state.profile.display(),
         state.store.directory.display()
     );
@@ -770,7 +788,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     ui.set_directory(state.store.directory.to_string_lossy().into_owned().into());
     ui.set_catboy(state.store.mirror == Mirror::Catboy);
-    ui.set_light(state.store.light || args.iter().any(|arg| arg == "--light"));
+    let theme = if args.iter().any(|arg| arg == "--light") {
+        Theme::Light
+    } else if let Some(index) = args.iter().position(|arg| arg == "--theme") {
+        Theme::from_index(args.get(index + 1).ok_or("Missing theme index")?.parse()?)
+    } else {
+        state.store.selected_theme()
+    };
+    ui.set_theme_index(theme.index());
     ui.set_spanish(state.store.spanish);
     ui.set_triangles(visuals::triangles());
     ui.set_ranges(ModelRc::new(VecModel::from(state.ranges.clone())));
@@ -823,6 +848,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_theme_changed(move || {
         if let Some(ui) = weak.upgrade() {
             let mut state = state.borrow_mut();
+            state.store.theme = Some(Theme::from_index(ui.get_theme_index()));
             state.store.light = ui.get_light();
             state.store.spanish = ui.get_spanish();
             if !state.demo {
@@ -946,7 +972,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if state.running.is_none() && !state.store.queue.iter().any(|item| item.status == Status::Pending) {
                         state.store.queue.clear();
                     } else {
-                        ui.set_notice("Cancel pending work and wait for the active transfer before clearing history".into());
+                        set_notice(&ui, "Cancel pending work and wait for the active transfer before clearing history", true);
                     }
                 }
                 _ => {}
@@ -962,11 +988,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut state = state.borrow_mut();
             let path = PathBuf::from(directory.as_str());
             if !path.is_absolute() || path.parent().is_none() {
-                ui.set_notice("Choose an absolute download folder, not a filesystem root".into());
+                set_notice(
+                    &ui,
+                    "Choose an absolute download folder, not a filesystem root",
+                    true,
+                );
                 return;
             }
             if let Err(error) = fs::create_dir_all(&path) {
-                ui.set_notice(error.to_string().into());
+                set_notice(&ui, error.to_string(), true);
                 return;
             }
             state.store.directory = path;
@@ -979,9 +1009,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_download_location(
                     state.store.directory.to_string_lossy().into_owned().into(),
                 );
-                ui.set_notice(
-                    "Settings saved. Existing queue entries retain their original target folder."
-                        .into(),
+                set_notice(
+                    &ui,
+                    "Settings saved. Existing queue entries retain their original target folder.",
+                    false,
                 );
             }
         }
@@ -999,7 +1030,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 && let Err(error) =
                     webbrowser::open(&format!("https://osu.ppy.sh/beatmapsets/{id}"))
             {
-                ui.set_notice(error.to_string().into());
+                set_notice(&ui, error.to_string(), true);
             }
         }
     });
@@ -1052,13 +1083,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let parsed = match parsed {
                 Ok(value) => value,
                 Err(error) => {
-                    ui.set_notice(error.into());
+                    set_notice(&ui, error, true);
                     return;
                 }
             };
             state.busy = true;
             state.refresh(&ui);
-            ui.set_notice("Loading public metadata…".into());
+            set_notice(&ui, "Loading public metadata…", false);
             let client = state.client.clone();
             let sender = state.sender.clone();
             thread::spawn(move || {
@@ -1181,6 +1212,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.iter().any(|arg| arg == "--narrow") {
         ui.window().set_size(slint::LogicalSize::new(440.0, 900.0));
+    }
+    if args.iter().any(|arg| arg == "--medium") {
+        ui.window().set_size(slint::LogicalSize::new(960.0, 900.0));
+    }
+    if args.iter().any(|arg| arg == "--settings") {
+        ui.set_page(2);
     }
     if args.iter().any(|arg| arg == "--advanced") {
         ui.set_more(true);

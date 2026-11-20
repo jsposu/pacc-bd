@@ -1,34 +1,46 @@
-<h1 align="center">PACC-BD · Your next collection starts here</h1>
+# PACC-BD
 
-> **`rust-rewrite` experimental branch:** the native Rust/Slint app is
-> in [`native/`](native/README.md). Stable Electron development remains on `main`.
-> It supports real Collector/ID previews and `.osz` downloads with isolated data.
-> Native osu! collection editing is not enabled yet.
-<p align="center">Panama Accuracy Collector &amp; Beatmap Downloader</p>
+Native Rust + Slint desktop application for previewing public osu! Collector
+collections or osu! beatmap IDs and downloading complete `.osz` beatmapsets.
 
-![PACC-BD — current Dark theme interface](docs/images/app-preview.png)
+![PACC-BD dark theme](docs/images/app-preview.png)
 
-<p align="center">
-  <a href="https://github.com/jsposu/pacc-bd/releases/latest">Download</a> ·
-  <a href="docs/GUIDE.md">User guide</a> ·
-  <a href="https://github.com/jsposu/pacc-bd/issues">Report an issue</a>
-</p>
+[Download the latest release](https://github.com/jsposu/pacc-bd/releases/latest) ·
+[User guide](docs/GUIDE.md) ·
+[Report an issue](https://github.com/jsposu/pacc-bd/issues)
 
-Preview osu! Collector collections or beatmap IDs, filter difficulties, and download `.osz` files in one place.
+## Features
 
-- **Windows:** put the `*-portable.exe` in a writable folder and run it. No installation; settings stay in `PACC-BD-data` beside it.
-- **Linux:** make the `.AppImage` executable and run it; `libfuse2` may be required.
-- **Collections:** manage osu!stable collections with backups, or export for manual import into lazer.
-- **Appearance:** Dark / Light themes, English / Spanish, and desktop zoom.
+- Public osu! Collector collection previews and osu! ID/link lookup.
+- Search, filters, set selection, FIFO queue and deduplicated whole-set downloads.
+- Dark, Light, osu! Pink, Midnight, Forest and Sepia themes.
+- Windows portable executable with state in `PACC-BD-data/rust` beside the app.
+- Linux AppImage.
 
-**Downloads:** [Latest release](https://github.com/jsposu/pacc-bd/releases/latest) · x64 · checksums included. The Windows portable app is unsigned and can still trigger SmartScreen. Older releases include the former installer.
+PACC-BD never scans or modifies `Songs`, `collection.db`, or any osu! library.
+Import downloaded `.osz` files yourself. Native preferences are kept separate from
+the archived Electron application and are never migrated silently.
 
-Import beatmaps manually. Close osu!stable before editing collections; lazer support is export-only. The screenshot shows an example preview.
+## Development
 
-### Development
+Install the Rust toolchain, then:
 
-Node.js 22+ · `npm ci` · `npm run desktop`
+```sh
+cd native
+cargo run
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+```
 
-Checks: `npm run build:all` · `npm test`
+See [native/README.md](native/README.md) for diagnostics and live checks.
+The [security and reliability review](docs/SECURITY-REVIEW.md) records confirmed
+fixes, potential risks and checks that still require other platforms.
 
-Made by **osakari** for [Panama Accuracy](https://osu.ppy.sh/teams/15959). Unofficial community app. [MIT code license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md). osu! and team artwork retain their respective rights.
+The former Electron implementation is preserved at
+[`archive/electron-final-2026-11-20`](https://github.com/jsposu/pacc-bd/tree/archive/electron-final-2026-11-20).
+Historical releases remain available on GitHub.
+
+MIT application code. The interface uses
+[Slint](https://slint.dev/) under the Slint Royalty-free Desktop, Mobile, and Web
+Applications License 2.0; attribution is available from Settings through the
+`AboutSlint` widget. See [third-party notices](THIRD_PARTY_NOTICES.md).

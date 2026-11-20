@@ -1,0 +1,103 @@
+name: Rust release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: linux-x86_64
+          - os: windows-2022
+            artifact: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Package Windows portable executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ../dist -Force | Out-Null
+          Copy-Item target/release/pacc-bd-native.exe "../dist/PACC-BD-${{ github.ref_name }}-windows-x86_64-portable.exe"
+      - name: Check Windows portable data location
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: dist
+        run: |
+          $exe = @(Get-ChildItem '*-portable.exe')
+          if ($exe.Count -ne 1) { throw 'Expected exactly one portable executable.' }
+          $process = Start-Process -FilePath $exe[0].FullName -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+          if (!(Test-Path 'PACC-BD-data/rust/native.lock')) { throw 'Portable Rust data was not created beside the executable.' }
+          Remove-Item -Recurse -Force 'PACC-BD-data'
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y file patchelf
+      - name: Package Linux AppImage
+        if: runner.os == 'Linux'
+        working-directory: .
+        shell: bash
+        run: |
+          curl -L --fail --silent --show-error -o /tmp/linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          echo 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  /tmp/linuxdeploy.AppImage' | sha256sum --check
+          chmod +x /tmp/linuxdeploy.AppImage
+          cp build/icons/icon.png /tmp/pacc-bd.png
+          mkdir -p dist
+          NO_STRIP=1 LDAI_OUTPUT="dist/PACC-BD-${{ github.ref_name }}-linux-x86_64.AppImage" /tmp/linuxdeploy.AppImage --appimage-extract-and-run \
+            --appdir AppDir \
+            --executable native/target/release/pacc-bd-native \
+            --desktop-file packaging/linux/pacc-bd.desktop \
+            --icon-file /tmp/pacc-bd.png \
+            --output appimage
+      - name: Attest release binary provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: '*-x86_64'
+          path: dist
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum PACC-BD-* > SHA256SUMS
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          gh release create "${{ github.ref_name }}" dist/*
+          --verify-tag --prerelease
+          --title "PACC-BD ${{ github.ref_name }} · Rust"
+          --notes-file release-notes.md

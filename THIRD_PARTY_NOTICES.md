@@ -1,4 +1,14 @@
-# osu!lazer slider references
+# Third-party notices
+
+## Slint
+
+The user interface uses Slint 1.19 under the Slint Royalty-free Desktop, Mobile,
+and Web Applications License 2.0. The required `AboutSlint` attribution widget is
+available from the application's top-level Settings screen.
+
+License: https://slint.dev/agreements/slint-royalty-free-license.pdf
+
+## osu!lazer slider references
 
 The difficulty spectrum and slider colour behaviour in `src/difficultyColours.ts`
 are adapted from ppy/osu's `osu.Game/Graphics/OsuColour.cs` and

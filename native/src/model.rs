@@ -65,12 +65,40 @@ pub struct Download {
     pub total: Option<u64>,
 }
 
+/// Names are stable on disk; the old `light` preference is read only as fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Theme {
+    Dark,
+    Light,
+    Osu,
+    Midnight,
+    Forest,
+    Sepia,
+}
+impl Theme {
+    pub fn index(self) -> i32 {
+        self as i32
+    }
+    pub fn from_index(index: i32) -> Self {
+        match index {
+            1 => Self::Light,
+            2 => Self::Osu,
+            3 => Self::Midnight,
+            4 => Self::Forest,
+            5 => Self::Sepia,
+            _ => Self::Dark,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Store {
     pub version: u32,
     pub directory: PathBuf,
     pub mirror: Mirror,
     pub light: bool,
+    #[serde(default)]
+    pub theme: Option<Theme>,
     pub spanish: bool,
     pub collector: Vec<BeatmapSet>,
     pub ids: Vec<BeatmapSet>,
@@ -100,6 +128,7 @@ impl Store {
                 directory: profile.join("downloads"),
                 mirror: Mirror::Direct,
                 light: false,
+                theme: None,
                 spanish: false,
                 collector: vec![],
                 ids: vec![],
@@ -112,6 +141,13 @@ impl Store {
             return Err(io::Error::other("Unsupported native state version"));
         }
         Ok(value)
+    }
+    pub fn selected_theme(&self) -> Theme {
+        self.theme.unwrap_or(if self.light {
+            Theme::Light
+        } else {
+            Theme::Dark
+        })
     }
     pub fn save(&self, profile: &Path) -> io::Result<()> {
         atomic_json(&profile.join("native-state.json"), self)
@@ -325,5 +361,29 @@ mod tests {
         assert_eq!(recovery[0].status, Status::Pending);
         loaded.save(dir.path()).unwrap();
         assert!(Store::open(dir.path()).unwrap().take_recovery().is_empty());
+    }
+
+    #[test]
+    fn old_light_preference_migrates_without_rewriting_or_mixing_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = serde_json::json!({
+            "version": 1,
+            "directory": dir.path().join("downloads"),
+            "mirror": "Direct",
+            "light": true,
+            "spanish": false,
+            "collector": [],
+            "ids": [],
+            "collection_name": "No collection loaded",
+            "queue": []
+        });
+        fs::write(
+            dir.path().join("native-state.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let state = Store::open(dir.path()).unwrap();
+        assert_eq!(state.selected_theme(), Theme::Light);
+        assert_eq!(state.theme, None);
     }
 }

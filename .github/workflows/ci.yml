@@ -1,0 +1,57 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main, rust-rewrite]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: native
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Install Linux UI runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libxkbcommon-x11-0 libwayland-client0
+      - name: Functional UI smoke test
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo run --locked -- --smoke-test --data-dir "${{ runner.temp }}/pacc-smoke"
+        env:
+          SLINT_BACKEND: winit-software
+      - name: Functional UI smoke test
+        if: runner.os == 'Windows'
+        run: cargo run --locked -- --smoke-test --data-dir "${{ runner.temp }}/pacc-smoke"
+        env:
+          SLINT_BACKEND: winit-software
+      - name: Large-list scroll regression
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo run --locked -- --scroll-test --data-dir "${{ runner.temp }}/pacc-scroll"
+        env:
+          SLINT_BACKEND: winit-software
+          SLINT_SCALE_FACTOR: '1'

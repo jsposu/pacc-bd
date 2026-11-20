@@ -1,0 +1,23 @@
+// Stable order: Dark, Light, osu! Pink, Midnight, Forest, Sepia.
+export global Theme {
+    in-out property <int> index: 0;
+    out property <bool> light: index == 1 || index == 5;
+    in-out property <image> glass-art;
+    out property <color> bg: [#0b1016, #edf1f7, #18121c, #101629, #10201b, #f2eadb][index];
+    out property <color> panel: [#18232d, #ffffff, #251c2b, #1a2440, #192e26, #fff9ee][index];
+    out property <color> raised: [#293a49, #ffffff, #38273e, #293858, #294237, #fffdf7][index];
+    out property <color> text: [#f2f6fc, #182535, #fff3fa, #f1f5ff, #eefaf2, #30281e][index];
+    out property <color> muted: [#b9cbdd, #405266, #d9bfd5, #bfcee9, #bed6c6, #594b39][index];
+    out property <color> accent: [#fc86bc, #9c215d, #ff87bf, #a9bdff, #90dcb0, #854113][index];
+    out property <color> primary-ink: [#281525, #ffffff, #301024, #111d3e, #102a1d, #ffffff][index];
+    out property <color> outline: [#7890a6, #697e92, #a084a4, #7e94bc, #789d86, #88745b][index];
+    out property <color> hover: [#354b60, #e3eaf3, #4a3150, #34476d, #365646, #e9ddc7][index];
+    out property <color> selected: [#543248, #f8deeb, #60334e, #344577, #29533e, #ebd5b5][index];
+    out property <color> error: [#ffb4b4, #a11728, #ffb4b4, #ffb4b4, #ffb4b4, #9d1926][index];
+    out property <color> disabled: [#8b9baa, #637181, #a48eaa, #94a2ba, #90aa98, #756752][index];
+    out property <color> glass: raised;
+    out property <color> glass-top: light ? #ffffff00 : #b2d4f00a;
+    out property <color> glass-bottom: #00000000;
+    out property <color> glint: light ? #ffffff00 : #e0f1ff35;
+    out property <color> unselected: light ? #edf1f7c0 : #09121bc0;
+}

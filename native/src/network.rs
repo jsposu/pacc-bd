@@ -19,7 +19,11 @@ pub fn client() -> Result<Client> {
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(15))
-        .user_agent("PACC-BD-Rust/0.1 (public beatmap downloader)")
+        .user_agent(concat!(
+            "PACC-BD/",
+            env!("CARGO_PKG_VERSION"),
+            " (public beatmap downloader)"
+        ))
         .build()
         .map_err(|error| error.to_string())
 }
@@ -180,11 +184,13 @@ fn text(value: &Value, key: &str, fallback: &str) -> String {
 fn stat(value: &Value, key: &str) -> Option<f32> {
     value[key]
         .as_f64()
-        .filter(|v| v.is_finite() && *v >= 0.0)
+        .filter(|v| v.is_finite() && *v >= 0.0 && *v <= f32::MAX as f64)
         .map(|v| v as f32)
 }
 pub fn difficulty(raw: &Value) -> Option<Difficulty> {
-    let id = raw["id"].as_u64().filter(|id| *id > 0)?;
+    let id = raw["id"]
+        .as_u64()
+        .filter(|id| *id > 0 && *id <= i32::MAX as u64)?;
     let mode = raw["mode"].as_str().map(str::to_owned).unwrap_or_else(|| {
         ["osu", "taiko", "fruits", "mania"]
             .get(
@@ -396,6 +402,12 @@ pub fn cover(client: &Client, id: u64) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extreme_stats_do_not_become_infinite_ui_values() {
+        assert_eq!(stat(&serde_json::json!({"bpm": 1e300}), "bpm"), None);
+        assert!(difficulty(&serde_json::json!({"id": 4294967296u64})).is_none());
+    }
+
     #[test]
     fn rejects_untrusted_urls_and_normalizes_osu_inputs() {
         assert_eq!(

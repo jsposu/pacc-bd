@@ -2,6 +2,7 @@ pub mod desktop;
 pub mod download;
 pub mod model;
 pub mod network;
+pub mod profile;
 
 pub fn columns(width: f32) -> usize {
     if width >= 1180.0 {

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PACC-BD
+Comment=Preview and download osu! beatmapsets
+Exec=pacc-bd-native
+Icon=pacc-bd
+Categories=Game;Utility;
+Terminal=false

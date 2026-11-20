@@ -1,3 +1,4 @@
+import { Theme } from "theme.slint";
 import { ScrollView, AboutSlint, Palette } from "std-widgets.slint";
 
 export struct MapCard {
@@ -25,26 +26,6 @@ export global UiPalette {
     pure callback bpm-colour(float) -> color;
 }
 
-global Theme {
-    in-out property <bool> light: false;
-    in-out property <image> glass-art;
-    out property <color> bg: light ? #edf1f7 : #0b1016;
-    out property <color> panel: light ? #f8fafdee : #18232ded;
-    out property <color> raised: light ? #ffffff : #293a49;
-    out property <color> text: light ? #182535 : #f2f6fc;
-    out property <color> muted: light ? #485d72 : #b9cbdd;
-    out property <color> accent: light ? #a52865 : #fc86bc;
-    out property <color> primary-ink: light ? #ffffff : #281525;
-    out property <color> outline: light ? #a5b5c7 : #617a91;
-    out property <color> glass: light ? #ffffffcf : #233444d9;
-    out property <color> glass-top: light ? #ffffff9c : #b2d4f01b;
-    out property <color> glass-bottom: light ? #e8f0f77a : #111c2845;
-    out property <color> glint: light ? #ffffffeb : #e0f1ff55;
-    out property <color> hover: light ? #edf3fc : #354b60;
-    out property <color> selected: light ? #f8e4ef : #543248;
-    out property <color> unselected: light ? #edf1f7a0 : #09121ba0;
-}
-
 // Use the already blurred cover, not an expensive live backdrop filter on every
 // control. It gives the glass a soft tint with identical software/GPU behaviour.
 component GlassBox inherits Rectangle {
@@ -54,7 +35,7 @@ component GlassBox inherits Rectangle {
     border-color: Theme.outline;
     background: Theme.glass;
     clip: true;
-    if root.frosted: Image { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; source: Theme.glass-art; image-fit: cover; opacity: Theme.light ? 0.045 : 0.12; }
+    if root.frosted: Image { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; source: Theme.glass-art; image-fit: cover; opacity: Theme.light ? 0 : 0.04; }
     if root.frosted: Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; border-radius: 8px; background: @linear-gradient(160deg, Theme.glass-top, Theme.glass-bottom); }
     if root.frosted: Rectangle { x: 9px; y: 1px; width: parent.width - 18px; height: 1px; background: Theme.glint; }
     @children
@@ -166,12 +147,12 @@ component Action inherits GlassBox {
     min-width: 38px;
     height: 38px;
     frosted: !root.primary && !root.quiet;
-    background: primary ? Theme.accent : active ? Theme.selected : touch.has-hover ? Theme.hover : quiet ? transparent : Theme.glass;
+    background: !enabled ? Theme.panel : primary && touch.has-hover ? Theme.accent.darker(10%) : primary ? Theme.accent : active ? Theme.selected : touch.has-hover ? Theme.hover : quiet ? transparent : Theme.glass;
     border-width: active || focus.has-focus ? 2px : quiet ? 0px : 1px;
     border-color: active || focus.has-focus ? Theme.accent : Theme.outline;
     animate background { duration: 150ms; }
-    Text { x: 10px; y: 0px; width: max(0px,parent.width - 20px); height: parent.height; text: root.label; color: root.primary ? Theme.primary-ink : Theme.text; font-size: 12px; font-weight: root.active || root.primary ? 650 : 500; horizontal-alignment: root.align-left ? left : center; vertical-alignment: center; overflow: elide; }
-    opacity: enabled ? 1 : 0.45;
+    Text { x: 10px; y: 0px; width: max(0px,parent.width - 20px); height: parent.height; text: root.label; color: !root.enabled ? Theme.disabled : root.primary ? Theme.primary-ink : Theme.text; font-size: 12px; font-weight: root.active || root.primary ? 650 : 500; horizontal-alignment: root.align-left ? left : center; vertical-alignment: center; overflow: elide; }
+    opacity: 1;
     focus := FocusScope { x: 0px; width: 0px; enabled: root.enabled;
         key-pressed(event) => { if event.text == Key.Space || event.text == Key.Return { root.clicked(); return accept; } return reject; }
     }
@@ -193,7 +174,9 @@ component Card inherits Rectangle {
     border-width: map.selected ? 2px : 1px;
     border-color: map.selected ? Theme.accent : Theme.outline;
     Image { x: 0px; y: 0px; source: root.map.cover; width: parent.width; height: parent.height; image-fit: cover; }
-    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: Theme.light ? @linear-gradient(90deg, #f8faff00 0%, #f8fafffa 26%, #f8fafff5 74%, #f8faffde 100%) : @linear-gradient(90deg, #18232d00 0%, #18232df5 26%, #18232ddd 74%, #18232dbb 100%); }
+    // Artwork remains in the left strip; text always has an opaque surface.
+    Rectangle { x: 80px; y: 0px; width: parent.width - 80px; height: parent.height; background: Theme.panel; }
+
     Rectangle {
         x: 10px; y: 10px; width: 21px; height: 21px; border-radius: 11px;
         border-width: 2px; border-color: Theme.light ? #3a4e63 : #ffffffcc;
@@ -225,7 +208,7 @@ component Card inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "PACC-BD · Rust experimental";
+    title: "PACC-BD";
     icon: @image-url("../../public/panama-accuracy-flag.png");
     preferred-width: 1440px;
     preferred-height: 980px;
@@ -264,7 +247,8 @@ export component AppWindow inherits Window {
     in-out property <bool> include-unknown: false;
     in property <[string]> queue-titles;
     in-out property <string> search;
-    in-out property <bool> light: false;
+    in-out property <int> theme-index: 0;
+    out property <bool> light: theme-index == 1 || theme-index == 5;
     in-out property <bool> more: false;
     in-out property <bool> queue-open: false;
     in-out property <bool> list-view: false;
@@ -276,7 +260,8 @@ export component AppWindow inherits Window {
     in-out property <length> document-height;
     in-out property <length> viewport-height;
     in-out property <int> rendered-card-count;
-    in property <string> notice: "Experimental Rust · .osz files are never imported automatically";
+    in property <string> notice: "Download .osz files · import into osu! manually";
+    in property <bool> notice-error: false;
     callback search-changed;
     callback toggle-map(int);
     callback enqueue-map(int);
@@ -295,8 +280,8 @@ export component AppWindow inherits Window {
     callback page-changed;
     callback advanced-toggled;
     callback open-download-folder;
-    init => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
-    changed light => { Theme.light = root.light; Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; root.theme-changed(); }
+    init => { Theme.index = root.theme-index; Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
+    changed theme-index => { Theme.index = root.theme-index; Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; root.theme-changed(); }
     changed spanish => { root.theme-changed(); }
     changed search => { root.search-changed(); }
     changed star-min => { root.search-changed(); }
@@ -327,16 +312,15 @@ export component AppWindow inherits Window {
             Text { x: 0px; text: "For Panama Accuracy"; color: Theme.muted; font-size: 10px; y: 38px; }
             HorizontalLayout {
                 x: root.width < 1280px ? 0px : 155px; y: root.width < 1280px ? 62px : 8px;
-                width: min(590px, parent.width); height: 40px; spacing: 8px;
+                width: min(490px, parent.width); height: 40px; spacing: 8px;
                 Action { horizontal-stretch: 1; label: root.width < 760px ? "Collector" : "osu! Collector Downloader"; active: root.page == 0; clicked => { root.page = 0; } }
                 Action { horizontal-stretch: 1; label: root.width < 760px ? "Beatmap ID" : "Download by Beatmap ID"; active: root.page == 1; clicked => { root.page = 1; } }
-                Action { horizontal-stretch: 1; label: root.spanish ? "Colecciones" : "Collections"; active: root.page == 2; clicked => { root.page = 2; } }
             }
             HorizontalLayout {
                 x: parent.width - self.width; y: 8px; width: root.width < 760px ? 202px : 412px; height: 40px; spacing: 6px; alignment: end;
                 Action { width: root.width < 760px ? 70px : 152px; label: root.width < 760px ? (root.spanish ? "Archivos" : "Files") : (root.spanish ? "Abrir descargas" : "Open downloads"); description: "Open download folder: " + root.download-location; clicked => { root.open-download-folder(); } }
-                Action { width: root.width < 760px ? 40px : 84px; label: root.width < 760px ? (root.light ? "☾" : "☀") : (root.light ? "☾ Dark" : "☀ Light"); description: "Switch theme"; clicked => { root.light = !root.light; } }
-                Action { width: root.width < 760px ? 38px : 100px; label: root.width < 760px ? "⚙" : "Settings"; description: "Settings"; clicked => { root.page = 3; } }
+                Action { width: root.width < 760px ? 40px : 84px; label: root.width < 760px ? "◐" : "Theme"; description: "Change theme in Settings"; clicked => { root.page = 2; } }
+                Action { width: root.width < 760px ? 38px : 100px; label: root.width < 760px ? "⚙" : "Settings"; description: "Settings"; clicked => { root.page = 2; } }
                 Action { width: root.width < 760px ? 36px : 44px; label: root.spanish ? "EN" : "ES"; clicked => { root.spanish = !root.spanish; } }
             }
         }
@@ -488,10 +472,21 @@ export component AppWindow inherits Window {
         if root.page >= 2: Rectangle {
             vertical-stretch: 1; background: Theme.panel; border-radius: 8px;
             VerticalLayout { padding: 30px; spacing: 18px;
-                Text { text: root.page == 2 ? "Collections · migration pending" : "Settings · experimental profile"; color: Theme.text; font-size: root.width < 760px ? 21px : 25px; wrap: word-wrap; }
-                Text { text: "This native prototype never scans or modifies your osu! library.\nExisting Electron settings and downloads are not opened."; color: Theme.muted; wrap: word-wrap; font-size: 14px; }
-                Action { label: root.light ? "Switch to Dark" : "Switch to Light"; clicked => { root.light = !root.light; } }
-                if root.page == 3: VerticalLayout { spacing: 12px;
+                Text { text: "Settings"; color: Theme.text; font-size: root.width < 760px ? 21px : 25px; wrap: word-wrap; }
+                Text { text: "PACC-BD never scans or modifies your osu! library.\nSettings and downloads stay in this native profile."; color: Theme.muted; wrap: word-wrap; font-size: 14px; }
+                Text { text: root.spanish ? "Tema" : "Theme"; color: Theme.text; font-size: 14px; font-weight: 650; }
+                Rectangle {
+                    height: root.width < 760px ? 132px : 84px;
+                    for name[index] in ["Dark", "Light", "osu! Pink", "Midnight", "Forest", "Sepia"]: Action {
+                        x: mod(index, root.width < 760px ? 2 : 3) * (parent.width + 10px) / (root.width < 760px ? 2 : 3);
+                        y: floor(index / (root.width < 760px ? 2 : 3)) * 46px;
+                        width: (parent.width - (root.width < 760px ? 10px : 20px)) / (root.width < 760px ? 2 : 3);
+                        label: name;
+                        active: root.theme-index == index;
+                        clicked => { root.theme-index = index; }
+                    }
+                }
+                if root.page == 2: VerticalLayout { spacing: 12px;
                     Text { text: "Download folder (absolute path)"; color: Theme.muted; }
                     GlassInput { text <=> root.directory; placeholder: "Absolute download folder"; }
                     Action { label: root.catboy ? "Mirror: catboy.best" : "Mirror: osu.direct"; clicked => { root.catboy = !root.catboy; } }
@@ -501,21 +496,21 @@ export component AppWindow inherits Window {
                 Rectangle { vertical-stretch: 1; }
             }
         }
-        Text { text: root.notice; color: Theme.muted; font-size: 10px; wrap: word-wrap; }
+        Text { text: root.notice; color: root.notice-error ? Theme.error : Theme.muted; font-size: 12px; font-weight: root.notice-error ? 650 : 400; wrap: word-wrap; }
     }
     if root.recovery-count > 0: Rectangle {
         width: parent.width; height: parent.height; background: #000000c0;
         TouchArea { }
         Rectangle {
-            width: min(470px, parent.width - 32px); height: 220px;
+            width: min(470px, parent.width - 32px); height: 270px;
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             background: Theme.panel; border-radius: 10px; border-width: 1px; border-color: Theme.accent;
             VerticalLayout { padding: 24px; spacing: 16px;
-                Text { text: "¿Recuperar la cola anterior?"; color: Theme.text; font-size: 21px; font-weight: 700; }
-                Text { text: root.recovery-count + " mapas pendientes de la sesión anterior.\nNo se ha iniciado ninguna descarga.\nRecuperar inicia la cola. Descartar no borra archivos completados."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                Text { text: root.spanish ? "¿Recuperar pendientes?" : "Recover pending downloads?"; wrap: word-wrap; color: Theme.text; font-size: 21px; font-weight: 700; }
+                Text { text: root.recovery-count + (root.spanish ? " mapas pendientes.\nNo se ha iniciado ninguna descarga.\nRecuperar inicia la cola. Descartar no borra archivos." : " pending downloads.\nNothing has started.\nRecover starts the queue. Discard never deletes files."); color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                 HorizontalLayout { spacing: 16px;
-                    Action { label: "Descartar"; clicked => { root.recovery-choice(false); } }
-                    Action { label: "Recuperar"; primary: true; clicked => { root.recovery-choice(true); } }
+                    Action { label: root.spanish ? "Descartar" : "Discard"; clicked => { root.recovery-choice(false); } }
+                    Action { label: root.spanish ? "Recuperar" : "Recover"; primary: true; clicked => { root.recovery-choice(true); } }
                 }
             }
         }

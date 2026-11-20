@@ -21,13 +21,34 @@ pub fn valid_osz(path: &Path) -> Result<()> {
         return Err("Archive contains too many entries".into());
     }
     let mut scanned = 0;
+    let mut expanded = 0u64;
     let mut has_osu = false;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|error| error.to_string())?;
-        if entry.enclosed_name().is_none() {
+        // Apply the same rules on Linux and Windows. These files are later
+        // imported by another application, even though we never extract them.
+        let name = entry
+            .name()
+            .map_err(|_| "Archive entry name is not valid text")?
+            .into_owned();
+        if entry.enclosed_name().is_none()
+            || name.contains(['\\', ':'])
+            || name
+                .split('/')
+                .any(|part| part == ".." || part.chars().any(char::is_control))
+            || entry
+                .unix_mode()
+                .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
             return Err("Unsafe archive entry path".into());
         }
-        if !has_osu && entry.name().to_ascii_lowercase().ends_with(".osu") && !entry.is_dir() {
+        expanded = expanded
+            .checked_add(entry.size())
+            .ok_or("Archive size overflow")?;
+        if expanded > 4 * MAX_ARCHIVE || entry.size() > MAX_ARCHIVE {
+            return Err("Archive expanded size exceeds safety limit".into());
+        }
+        if !has_osu && name.to_ascii_lowercase().ends_with(".osu") && !entry.is_dir() {
             if entry.size() > 16 * 1024 * 1024 {
                 return Err("Oversized .osu entry".into());
             }
@@ -218,6 +239,57 @@ mod tests {
             .unwrap();
         writer.finish().unwrap().into_inner()
     }
+    #[test]
+    fn rejects_windows_paths_and_zip_symlinks() {
+        for name in [
+            "C:/outside.osu",
+            "dir/../../outside.osu",
+            "dir\\..\\outside.osu",
+            "song.osu:stream",
+        ] {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"osu file format v14\n").unwrap();
+            let bytes = writer.finish().unwrap().into_inner();
+            let dir = tempfile::tempdir().unwrap();
+            assert!(
+                save_stream(
+                    &bytes[..],
+                    None,
+                    dir.path(),
+                    1,
+                    &AtomicBool::new(false),
+                    |_, _| {}
+                )
+                .is_err(),
+                "accepted {name}"
+            );
+        }
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .add_symlink(
+                "map.osu",
+                "osu file format v14",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            save_stream(
+                &bytes[..],
+                None,
+                dir.path(),
+                1,
+                &AtomicBool::new(false),
+                |_, _| {}
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn unsafe_entries_after_a_valid_map_are_rejected_without_extraction() {
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
