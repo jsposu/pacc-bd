@@ -16,7 +16,7 @@ pub fn windows_portable_data_dir(executable: &Path) -> io::Result<PathBuf> {
 pub fn default_data_dir() -> io::Result<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        return windows_portable_data_dir(&std::env::current_exe()?);
+        windows_portable_data_dir(&std::env::current_exe()?)
     }
     #[cfg(not(target_os = "windows"))]
     {
