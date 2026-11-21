@@ -29,6 +29,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup show
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: native -> target
       - run: cargo test --locked
       - run: cargo build --release --locked
       - name: Package Windows portable executable
